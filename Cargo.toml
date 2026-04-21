@@ -1,0 +1,3 @@
+[workspace]
+members = ["event-proto", "grpc-service", "geyser-plugin"]
+resolver = "2"

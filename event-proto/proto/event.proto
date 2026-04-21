@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package blockdaemon.solana.accountsdb_plugin_kafka.types;
+
+message UpdateAccountEvent {
+  uint64 slot = 1;
+  bytes pubkey = 2;
+  uint64 lamports = 3;
+  bytes owner = 4;
+  bool executable = 5;
+  uint64 rent_epoch = 6;
+  bytes data = 7;
+  uint64 write_version = 8;
+  optional bytes txn_signature = 9;
+  uint32 data_version = 10;
+  bool is_startup = 11;
+  uint64 account_age = 12;
+}
+
+message MessageWrapper {
+  oneof event_message {
+    UpdateAccountEvent account = 1;
+  }
+}
