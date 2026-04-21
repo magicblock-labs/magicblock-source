@@ -22,7 +22,7 @@ init-config:
 	fi
 
 run:
-	cargo run -- --config "$(CONFIG)"
+	cargo run -- --config "$(CONFIG)" $(PUBKEY)
 
 client:
 	cargo run --example grpc_client -- --endpoint "$(GRPC_ENDPOINT)"
