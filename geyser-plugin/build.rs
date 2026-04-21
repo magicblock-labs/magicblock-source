@@ -11,7 +11,7 @@ fn main() -> anyhow::Result<()> {
     // vergen git version does not looks cool
     println!(
         "cargo:rustc-env=GIT_VERSION={}",
-        git_version::git_version!(fallback = "unknown")
+        git_version::git_version!()
     );
 
     // Extract Solana version
