@@ -1,0 +1,11 @@
+serde:
+  protobuf:
+    enabled: true
+    mappings:
+      - topicName: solana.testnet.account_updates
+        valueProtoType: blockdaemon.solana.accountsdb_plugin_kafka.types.MessageWrapper
+    fileSystem:
+      enabled: true
+      refreshInterval: 5m
+      paths:
+        - /etc/protos
