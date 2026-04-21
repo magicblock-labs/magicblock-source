@@ -1,0 +1,33 @@
+[package]
+name = "magigblock-grpc-service"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+async-stream = "0.3"
+base64 = "0.22"
+bs58 = "0.5"
+futures = "0.3"
+helius-laserstream = { git = "https://github.com/magicblock-labs/laserstream-sdk", rev = "fe205cb2b85864d1821027d663813d66160285dc" }
+magigblock-event-proto = { path = "../event-proto" }
+prost = "0.14.3"
+prost-types = "0.13.5"
+rdkafka = { version = "0.37", features = ["cmake-build", "tokio"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "rustls-tls",
+] }
+serde_json = "1.0"
+tokio = { version = "1.47", features = ["macros", "rt-multi-thread", "signal"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tonic = { version = "0.12", features = ["transport"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+thiserror = "2.0"
+
+[[example]]
+name = "grpc_client"
+
+[dev-dependencies]
+axum = "0.8"
