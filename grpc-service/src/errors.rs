@@ -2,7 +2,7 @@ use base64::DecodeError as Base64DecodeError;
 use prost::DecodeError as ProstDecodeError;
 use rdkafka::error::KafkaError;
 use serde_json::Value;
-use std::{env::VarError, io, net::AddrParseError};
+use std::{io, net::AddrParseError, path::PathBuf};
 use thiserror::Error;
 use tokio::task::JoinError;
 use tonic::transport::Error as TonicTransportError;
@@ -11,7 +11,7 @@ pub type GeykagResult<T> = Result<T, GeykagError>;
 
 #[derive(Debug, Error)]
 pub enum GeykagError {
-    #[error("usage: cargo run -- [PUBKEY]")]
+    #[error("usage: cargo run -- [--config PATH] [PUBKEY]")]
     InvalidCliUsage,
     #[error("invalid base58 pubkey: {value}")]
     InvalidPubkey {
@@ -22,14 +22,17 @@ pub enum GeykagError {
         "invalid Solana pubkey length: expected 32 bytes after base58 decode, got {actual}"
     )]
     InvalidPubkeyLength { actual: usize },
-    #[error("failed to read environment variable {key}")]
-    InvalidEnvRead { key: &'static str, source: VarError },
-    #[error("invalid value for environment variable {key}: {value}")]
-    InvalidEnvValue {
-        key: &'static str,
-        value: String,
+    #[error("failed to read config file {path}")]
+    ConfigFileRead {
+        path: PathBuf,
         #[source]
-        source: Box<dyn std::error::Error + Send + Sync>,
+        source: io::Error,
+    },
+    #[error("failed to parse TOML config file {path}")]
+    ConfigTomlParse {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
     },
     #[error("failed to create HTTP client for ksqlDB")]
     KsqlClientBuild {

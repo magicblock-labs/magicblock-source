@@ -72,14 +72,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             item = update_stream.next() => {
                 match item {
                     Some(Ok(update)) => {
-                        if let Some(UpdateOneof::Account(account_update)) = update.update_oneof {
-                            if let Some(info) = account_update.account {
-                                println!(
-                                    "--- update slot={} ---\n{}",
-                                    account_update.slot,
-                                    format_account_info(&info),
-                                );
-                            }
+                        if let Some(UpdateOneof::Account(account_update)) =
+                            update.update_oneof
+                            && let Some(info) = account_update.account
+                        {
+                            println!(
+                                "--- update slot={} ---\n{}",
+                                account_update.slot,
+                                format_account_info(&info),
+                            );
                         }
                     }
                     Some(Err(status)) => {
@@ -180,10 +181,10 @@ fn parse_endpoint() -> String {
     let args: Vec<String> = std::env::args().collect();
     let mut i = 1;
     while i < args.len() {
-        if args[i] == "--endpoint" {
-            if let Some(val) = args.get(i + 1) {
-                return val.clone();
-            }
+        if args[i] == "--endpoint"
+            && let Some(val) = args.get(i + 1)
+        {
+            return val.clone();
         }
         i += 1;
     }

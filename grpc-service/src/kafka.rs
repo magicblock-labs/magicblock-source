@@ -28,15 +28,22 @@ impl KafkaAccountUpdateStream {
     where
         H: FnMut(StreamMessage) -> GeykagResult<()>,
     {
-        let consumer: StreamConsumer = ClientConfig::new()
-            .set("bootstrap.servers", &self.config.broker)
+        let mut client_config = ClientConfig::new();
+        client_config
+            .set("bootstrap.servers", &self.config.bootstrap_servers)
             .set("group.id", &self.config.group_id)
             .set("auto.offset.reset", &self.config.auto_offset_reset)
-            .set("enable.auto.commit", "true")
-            .create()
-            .map_err(|source| GeykagError::KafkaConsumerCreate {
-                broker: self.config.broker.clone(),
-                source,
+            .set("enable.auto.commit", "true");
+        for (key, value) in &self.config.client {
+            client_config.set(key, value);
+        }
+
+        let consumer: StreamConsumer =
+            client_config.create().map_err(|source| {
+                GeykagError::KafkaConsumerCreate {
+                    broker: self.config.bootstrap_servers.clone(),
+                    source,
+                }
             })?;
 
         consumer
@@ -47,7 +54,7 @@ impl KafkaAccountUpdateStream {
             })?;
 
         info!(
-            broker = self.config.broker,
+            broker = self.config.bootstrap_servers,
             topic = self.config.topic,
             group_id = self.config.group_id,
             auto_offset_reset = self.config.auto_offset_reset,
@@ -113,10 +120,10 @@ fn decode_account_update(payload: &[u8]) -> GeykagResult<AccountUpdate> {
         return Ok(account);
     }
 
-    if let Some(stripped_payload) = strip_confluent_protobuf_framing(payload) {
-        if let Ok(account) = decode_raw_account_update(stripped_payload) {
-            return Ok(account);
-        }
+    if let Some(stripped_payload) = strip_confluent_protobuf_framing(payload)
+        && let Ok(account) = decode_raw_account_update(stripped_payload)
+    {
+        return Ok(account);
     }
 
     Err(GeykagError::UnsupportedPayloadEncoding)

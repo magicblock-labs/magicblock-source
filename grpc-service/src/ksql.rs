@@ -56,10 +56,8 @@ impl KsqlAccountSnapshotClient {
     }
 
     async fn execute_query(&self, sql: &str) -> GeykagResult<String> {
-        let url = format!(
-            "{}/query-stream",
-            self.config.server_url.trim_end_matches('/')
-        );
+        let url =
+            format!("{}/query-stream", self.config.url.trim_end_matches('/'));
 
         let response = self
             .client
