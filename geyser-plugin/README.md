@@ -34,10 +34,6 @@ topic = "solana.testnet.account_updates"
 "compression.type" = "lz4"
 "partitioner" = "murmur2_random"
 
-[ksql]
-url = "http://127.0.0.1:8088"
-table = "accounts"
-
 [plugin]
 shutdown_timeout_ms = 30000
 local_rpc_url = "http://127.0.0.1:8899"
