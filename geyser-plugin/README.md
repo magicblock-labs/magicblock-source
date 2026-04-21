@@ -21,18 +21,24 @@ This plugin publishes confirmed Solana account updates to Kafka.
 
 ## Quick Start
 
-```json
-{
-  "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
-  "kafka": {
-    "bootstrap.servers": "localhost:9092"
-  },
-  "shutdown_timeout_ms": 30000,
-  "update_account_topic": "solana.testnet.account_updates",
-  "local_rpc_url": "http://127.0.0.1:8899",
-  "admin": "127.0.0.1:3000",
-  "init_tracking_from_ksql_url": "http://127.0.0.1:8088"
-}
+```toml
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[kafka.client]
+"request.required.acks" = "1"
+"message.timeout.ms" = "30000"
+"compression.type" = "lz4"
+"partitioner" = "murmur2_random"
+
+[plugin]
+shutdown_timeout_ms = 30000
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:3000"
+metrics = false
 ```
 
 After the plugin is running, add accounts to the whitelist:
@@ -69,34 +75,39 @@ The Solana validator and this plugin must be built against matching Solana and R
 
 ## Configuration
 
-Config is provided as JSON.
+Config is provided as TOML.
 
 Supported fields:
 
 - `libpath`: path to the plugin shared library
-- `kafka`: `librdkafka` producer configuration
-- `shutdown_timeout_ms`: producer flush timeout on shutdown
-- `update_account_topic`: Kafka topic for wrapped account updates
-- `local_rpc_url`: local validator RPC endpoint used for initial account backfill
-- `admin`: required listen address for the admin HTTP API (account management and metrics)
-- `metrics`: optional boolean (default `false`); set to `true` to enable the `/metrics` endpoint
-- `init_tracking_from_ksql_url`: optional ksqlDB base URL; when set, startup restores tracked pubkeys from `accounts` and fails fast if restore cannot complete
+- `[kafka]`
+  - `bootstrap_servers`: Kafka bootstrap broker list
+  - `topic`: Kafka topic for wrapped account updates
+- `[kafka.client]`: optional raw `librdkafka` producer settings using quoted keys such as `"compression.type"` or `"linger.ms"`
+- `[ksql]`
+  - `url`: optional ksqlDB base URL; when set, startup restores tracked pubkeys from `accounts` and fails fast if restore cannot complete
+  - `table`: ksqlDB table name for startup restore, default `accounts`
+- `[plugin]`
+  - `shutdown_timeout_ms`: producer flush timeout on shutdown
+  - `local_rpc_url`: local validator RPC endpoint used for initial account backfill
+  - `admin`: required listen address for the admin HTTP API
+  - `metrics`: optional boolean, default `false`; set to `true` to enable the `/metrics` endpoint
 
 Minimal config:
 
-```json
-{
-  "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
-  "kafka": {
-    "bootstrap.servers": "localhost:9092"
-  },
-  "update_account_topic": "solana.testnet.account_updates",
-  "local_rpc_url": "http://127.0.0.1:8899",
-  "admin": "127.0.0.1:3000"
-}
+```toml
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:3000"
 ```
 
-`update_account_topic`, `local_rpc_url`, and `admin` are required. The `admin` bind address serves `POST /filters/accounts` and, when `metrics` is `true`, also `GET /metrics`. If `init_tracking_from_ksql_url` is set, it must be a valid absolute `http` or `https` base URL and startup will fail if the restore query cannot complete. Legacy filter arrays and legacy transaction, slot-status, block, and wrapping options are rejected during config parsing.
+`kafka.bootstrap_servers`, `kafka.topic`, `plugin.local_rpc_url`, and `plugin.admin` are required. The `admin` bind address serves `POST /filters/accounts` and, when `plugin.metrics` is `true`, also `GET /metrics`. If `ksql.url` is set, it must be a valid absolute `http` or `https` base URL and startup will fail if the restore query cannot complete. Legacy filter arrays and legacy transaction, slot-status, block, and wrapping options are rejected during config parsing.
 
 ## Whitelist Management
 
@@ -124,15 +135,15 @@ The plugin publishes one wire format only:
 
 The Kafka producer is non-blocking so validator progress is not stalled by broker latency. If the producer queue fills, additional events may be dropped.
 
-Useful `librdkafka` settings include:
+Useful `librdkafka` settings for `[kafka.client]` include:
 
-- `queue.buffering.max.messages`
-- `queue.buffering.max.kbytes`
-- `statistics.interval.ms`
+- `"queue.buffering.max.messages"`
+- `"queue.buffering.max.kbytes"`
+- `"statistics.interval.ms"`
 
 ## Migration
 
-Older configs must be reduced to the account-only shape above.
+Older configs must be reduced to the account-only TOML shape above.
 
 Remove:
 

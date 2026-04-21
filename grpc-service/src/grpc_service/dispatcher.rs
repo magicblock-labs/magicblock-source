@@ -383,10 +383,10 @@ fn evaluate_client_health(
         return Some(ClientRemovalReason::ConsecutiveFailures);
     }
 
-    if let Some(backpressure_since) = health.backpressure_since {
-        if now.duration_since(backpressure_since) >= MAX_BACKPRESSURE_AGE {
-            return Some(ClientRemovalReason::BackpressureTimeout);
-        }
+    if let Some(backpressure_since) = health.backpressure_since
+        && now.duration_since(backpressure_since) >= MAX_BACKPRESSURE_AGE
+    {
+        return Some(ClientRemovalReason::BackpressureTimeout);
     }
 
     None

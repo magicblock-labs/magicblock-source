@@ -40,6 +40,7 @@ rdkafka = { version = "0.39.0", features = ["ssl", "sasl"] }
 reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.149" }
+toml = "0.9.12"
 tokio = { version = "1.50.0", features = ["rt-multi-thread", "time", "macros", "sync", "net"] }
 tower = { version = "0.5.3", features = ["make"] }
 

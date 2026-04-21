@@ -93,9 +93,10 @@ impl GeyserPlugin for KafkaPlugin {
         info!("rd_kafka_version: {:#08x}, {}", version_n, version_s);
 
         let mut producer_config = ClientConfig::new();
-        for (key, value) in &config.kafka {
+        for (key, value) in &config.kafka.client {
             producer_config.set(key, value);
         }
+        producer_config.set("bootstrap.servers", &config.kafka.bootstrap_servers);
         let producer = rdkafka::producer::ThreadedProducer::from_config_and_context(
             &producer_config,
             StatsThreadedProducerContext,
@@ -106,14 +107,14 @@ impl GeyserPlugin for KafkaPlugin {
         })?;
         let publisher = Arc::new(Publisher::new(
             producer,
-            Duration::from_millis(config.shutdown_timeout_ms),
+            Duration::from_millis(config.plugin.shutdown_timeout_ms),
         ));
-        let update_account_topic = Arc::new(config.update_account_topic.clone());
+        let update_account_topic = Arc::new(config.kafka.topic.clone());
         let initial_account_backfill = InitialAccountBackfill::new(
             publisher.clone(),
             update_account_topic.clone(),
             self.account_subscriptions.clone(),
-            config.local_rpc_url.clone(),
+            config.plugin.local_rpc_url.clone(),
         )
         .map_err(|error| PluginError::Custom(Box::new(error)))?;
         Self::restore_tracking_from_ksql(
@@ -122,10 +123,10 @@ impl GeyserPlugin for KafkaPlugin {
             &initial_account_backfill,
         )?;
         let http_service = HttpService::new(
-            config.admin,
+            config.plugin.admin,
             self.account_subscriptions.clone(),
             initial_account_backfill.handle(),
-            config.metrics,
+            config.plugin.metrics,
         )
         .map_err(|error| PluginError::Custom(Box::new(error)))?;
 
@@ -217,11 +218,12 @@ impl KafkaPlugin {
         account_subscriptions: &AccountSubscriptions,
         initial_account_backfill: &InitialAccountBackfill,
     ) -> PluginResult<()> {
-        let Some(url) = config.init_tracking_from_ksql_url.as_deref() else {
+        let Some(raw_url) = config.ksql.url.as_deref() else {
             return Ok(());
         };
+        let url = raw_url.trim();
 
-        let table = &config.init_tracking_from_ksql_table;
+        let table = &config.ksql.table;
         info!("Startup ksql restore enabled, url={}, table={}", url, table);
 
         let client = KsqlPubkeyRestoreClient::new(url, table)

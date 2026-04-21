@@ -1,12 +1,16 @@
-use std::env;
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use crate::domain::PubkeyFilter;
 use crate::errors::{GeykagError, GeykagResult};
 
-const DEFAULT_BROKER: &str = "localhost:9092";
+const DEFAULT_CONFIG_PATH: &str = "configs/config.toml";
+const DEFAULT_BOOTSTRAP_SERVERS: &str = "localhost:9092";
 const DEFAULT_TOPIC: &str = "solana.testnet.account_updates";
 const DEFAULT_GROUP_ID: &str = "kafka2grpc-dev";
-const DEFAULT_KSQL_SERVER_URL: &str = "http://localhost:8088";
+const DEFAULT_KSQL_URL: &str = "http://localhost:8088";
 const DEFAULT_KSQL_TABLE: &str = "ACCOUNTS";
 const DEFAULT_VALIDATOR_ACCOUNTS_FILTER_URL: &str =
     "http://localhost:3000/filters/accounts";
@@ -26,15 +30,16 @@ pub struct Config {
 
 #[derive(Clone, Debug)]
 pub struct KafkaConfig {
-    pub broker: String,
+    pub bootstrap_servers: String,
     pub topic: String,
     pub group_id: String,
     pub auto_offset_reset: String,
+    pub client: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
 pub struct KsqlConfig {
-    pub server_url: String,
+    pub url: String,
     pub table: String,
 }
 
@@ -50,76 +55,159 @@ pub struct GrpcConfig {
     pub dispatcher_capacity: usize,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileConfig {
+    #[serde(default)]
+    kafka: Option<FileKafkaConfig>,
+    #[serde(default)]
+    ksql: Option<FileKsqlConfig>,
+    #[serde(default)]
+    validator: Option<FileValidatorConfig>,
+    #[serde(default)]
+    grpc: Option<FileGrpcConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileKafkaConfig {
+    #[serde(default)]
+    bootstrap_servers: Option<String>,
+    #[serde(default)]
+    topic: Option<String>,
+    #[serde(default)]
+    group_id: Option<String>,
+    #[serde(default)]
+    auto_offset_reset: Option<String>,
+    #[serde(default)]
+    client: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileKsqlConfig {
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    table: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileValidatorConfig {
+    #[serde(default)]
+    accounts_filter_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileGrpcConfig {
+    #[serde(default)]
+    bind_host: Option<String>,
+    #[serde(default)]
+    port: Option<u16>,
+    #[serde(default)]
+    dispatcher_capacity: Option<usize>,
+}
+
 impl Config {
     pub fn load() -> GeykagResult<Self> {
-        let kafka = KafkaConfig {
-            broker: env::var("KAFKA_BROKER")
-                .unwrap_or_else(|_| DEFAULT_BROKER.to_owned()),
-            topic: env::var("KAFKA_TOPIC")
-                .unwrap_or_else(|_| DEFAULT_TOPIC.to_owned()),
-            group_id: env::var("KAFKA_GROUP_ID")
-                .unwrap_or_else(|_| DEFAULT_GROUP_ID.to_owned()),
-            auto_offset_reset: env::var("KAFKA_AUTO_OFFSET_RESET")
-                .unwrap_or_else(|_| DEFAULT_AUTO_OFFSET_RESET.to_owned()),
-        };
+        let (path, pubkey_filter) = Self::parse_args()?;
+        let file = Self::load_file(&path)?;
 
-        let ksql = KsqlConfig {
-            server_url: env::var("KSQL_SERVER_URL")
-                .unwrap_or_else(|_| DEFAULT_KSQL_SERVER_URL.to_owned()),
-            table: env::var("KSQL_TABLE")
-                .unwrap_or_else(|_| DEFAULT_KSQL_TABLE.to_owned()),
-        };
-
-        let validator = ValidatorConfig {
-            accounts_filter_url: env::var("VALIDATOR_ACCOUNTS_FILTER_URL")
-                .unwrap_or_else(|_| {
-                    DEFAULT_VALIDATOR_ACCOUNTS_FILTER_URL.to_owned()
-                }),
-        };
-
-        let grpc = GrpcConfig {
-            bind_host: env::var("GRPC_BIND_HOST")
-                .unwrap_or_else(|_| DEFAULT_GRPC_BIND_HOST.to_owned()),
-            port: parse_env_or_default("GRPC_PORT", DEFAULT_GRPC_PORT)?,
-            dispatcher_capacity: parse_env_or_default(
-                "GRPC_DISPATCHER_CAPACITY",
-                DEFAULT_GRPC_DISPATCHER_CAPACITY,
-            )?,
-        };
-
-        let args = env::args().skip(1).collect::<Vec<_>>();
-        let pubkey_filter = match args.as_slice() {
-            [] => None,
-            [pubkey] => Some(PubkeyFilter::parse(pubkey)?),
-            _ => return Err(GeykagError::InvalidCliUsage),
-        };
+        let kafka = file.kafka.unwrap_or(FileKafkaConfig {
+            bootstrap_servers: None,
+            topic: None,
+            group_id: None,
+            auto_offset_reset: None,
+            client: BTreeMap::new(),
+        });
+        let ksql = file.ksql.unwrap_or(FileKsqlConfig {
+            url: None,
+            table: None,
+        });
+        let validator = file.validator.unwrap_or(FileValidatorConfig {
+            accounts_filter_url: None,
+        });
+        let grpc = file.grpc.unwrap_or(FileGrpcConfig {
+            bind_host: None,
+            port: None,
+            dispatcher_capacity: None,
+        });
 
         Ok(Self {
-            kafka,
-            ksql,
-            validator,
-            grpc,
+            kafka: KafkaConfig {
+                bootstrap_servers: kafka
+                    .bootstrap_servers
+                    .unwrap_or_else(|| DEFAULT_BOOTSTRAP_SERVERS.to_owned()),
+                topic: kafka.topic.unwrap_or_else(|| DEFAULT_TOPIC.to_owned()),
+                group_id: kafka
+                    .group_id
+                    .unwrap_or_else(|| DEFAULT_GROUP_ID.to_owned()),
+                auto_offset_reset: kafka
+                    .auto_offset_reset
+                    .unwrap_or_else(|| DEFAULT_AUTO_OFFSET_RESET.to_owned()),
+                client: kafka.client,
+            },
+            ksql: KsqlConfig {
+                url: ksql.url.unwrap_or_else(|| DEFAULT_KSQL_URL.to_owned()),
+                table: ksql
+                    .table
+                    .unwrap_or_else(|| DEFAULT_KSQL_TABLE.to_owned()),
+            },
+            validator: ValidatorConfig {
+                accounts_filter_url: validator
+                    .accounts_filter_url
+                    .unwrap_or_else(|| {
+                        DEFAULT_VALIDATOR_ACCOUNTS_FILTER_URL.to_owned()
+                    }),
+            },
+            grpc: GrpcConfig {
+                bind_host: grpc
+                    .bind_host
+                    .unwrap_or_else(|| DEFAULT_GRPC_BIND_HOST.to_owned()),
+                port: grpc.port.unwrap_or(DEFAULT_GRPC_PORT),
+                dispatcher_capacity: grpc
+                    .dispatcher_capacity
+                    .unwrap_or(DEFAULT_GRPC_DISPATCHER_CAPACITY),
+            },
             pubkey_filter,
         })
     }
-}
 
-fn parse_env_or_default<T>(key: &'static str, default: T) -> GeykagResult<T>
-where
-    T: std::str::FromStr + Copy,
-    T::Err: std::error::Error + Send + Sync + 'static,
-{
-    match env::var(key) {
-        Ok(value) => {
-            value
-                .parse()
-                .map_err(|source| GeykagError::InvalidEnvValue {
-                    key,
-                    value,
-                    source: Box::new(source),
-                })
+    fn parse_args() -> GeykagResult<(PathBuf, Option<PubkeyFilter>)> {
+        let args = std::env::args().skip(1).collect::<Vec<_>>();
+
+        match args.as_slice() {
+            [] => Ok((PathBuf::from(DEFAULT_CONFIG_PATH), None)),
+            [arg] if arg == "--config" => Err(GeykagError::InvalidCliUsage),
+            [pubkey] => Ok((
+                PathBuf::from(DEFAULT_CONFIG_PATH),
+                Some(PubkeyFilter::parse(pubkey)?),
+            )),
+            [flag, path] if flag == "--config" => {
+                Ok((PathBuf::from(path), None))
+            }
+            [flag, path, pubkey] if flag == "--config" => {
+                Ok((PathBuf::from(path), Some(PubkeyFilter::parse(pubkey)?)))
+            }
+            _ => Err(GeykagError::InvalidCliUsage),
         }
-        Err(env::VarError::NotPresent) => Ok(default),
-        Err(source) => Err(GeykagError::InvalidEnvRead { key, source }),
+    }
+
+    fn load_file(path: &Path) -> GeykagResult<FileConfig> {
+        let contents = fs::read_to_string(path).map_err(|source| {
+            GeykagError::ConfigFileRead {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?;
+
+        toml::from_str(&contents).map_err(|source| {
+            GeykagError::ConfigTomlParse {
+                path: path.to_path_buf(),
+                source,
+            }
+        })
     }
 }
