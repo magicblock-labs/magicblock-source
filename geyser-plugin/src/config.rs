@@ -18,7 +18,7 @@ use {
     },
     reqwest::Url,
     serde::Deserialize,
-    std::{collections::HashMap, fs::File, net::SocketAddr, path::Path},
+    std::{collections::BTreeMap, fs::File, io::Read, net::SocketAddr, path::Path},
 };
 
 /// Plugin config.
@@ -29,32 +29,47 @@ pub struct Config {
     libpath: String,
 
     /// Kafka config.
-    pub kafka: HashMap<String, String>,
+    pub kafka: KafkaConfig,
 
-    /// Graceful shutdown timeout.
+    /// Optional ksqlDB startup restore config.
     #[serde(default)]
+    pub ksql: KsqlConfig,
+
+    /// Plugin-specific runtime config.
+    pub plugin: PluginConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KafkaConfig {
+    pub bootstrap_servers: String,
+    pub topic: String,
+    #[serde(default)]
+    pub client: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KsqlConfig {
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default = "default_ksql_table")]
+    pub table: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginConfig {
+    #[serde(default = "default_shutdown_timeout_ms")]
     pub shutdown_timeout_ms: u64,
-
-    /// Kafka topic to send wrapped account updates to.
-    pub update_account_topic: String,
-
-    /// Local validator RPC endpoint used for initial account backfill.
     pub local_rpc_url: String,
-
-    /// Admin HTTP endpoint for account management and optional metrics.
     pub admin: SocketAddr,
-
-    /// Enable the `/metrics` endpoint on the admin HTTP server.
     #[serde(default)]
     pub metrics: bool,
+}
 
-    /// Optional ksqlDB base URL used to restore tracked pubkeys during startup.
-    #[serde(default)]
-    pub init_tracking_from_ksql_url: Option<String>,
-
-    /// ksqlDB table name used for startup restore (default: "accounts").
-    #[serde(default = "default_ksql_table")]
-    pub init_tracking_from_ksql_table: String,
+fn default_shutdown_timeout_ms() -> u64 {
+    30_000
 }
 
 fn default_ksql_table() -> String {
@@ -65,23 +80,41 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             libpath: "".to_owned(),
-            kafka: HashMap::new(),
-            shutdown_timeout_ms: 30_000,
-            update_account_topic: String::new(),
-            local_rpc_url: String::new(),
-            admin: SocketAddr::from(([127, 0, 0, 1], 0)),
-            metrics: false,
-            init_tracking_from_ksql_url: None,
-            init_tracking_from_ksql_table: default_ksql_table(),
+            kafka: KafkaConfig {
+                bootstrap_servers: String::new(),
+                topic: String::new(),
+                client: BTreeMap::new(),
+            },
+            ksql: KsqlConfig {
+                url: None,
+                table: default_ksql_table(),
+            },
+            plugin: PluginConfig {
+                shutdown_timeout_ms: default_shutdown_timeout_ms(),
+                local_rpc_url: String::new(),
+                admin: SocketAddr::from(([127, 0, 0, 1], 0)),
+                metrics: false,
+            },
+        }
+    }
+}
+
+impl Default for KsqlConfig {
+    fn default() -> Self {
+        Self {
+            url: None,
+            table: default_ksql_table(),
         }
     }
 }
 
 impl Config {
-    /// Read plugin from JSON file.
+    /// Read plugin from TOML file.
     pub fn read_from<P: AsRef<Path>>(config_path: P) -> PluginResult<Self> {
-        let file = File::open(config_path)?;
-        let mut this: Self = serde_json::from_reader(file)
+        let mut file = File::open(config_path)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        let mut this: Self = toml::from_str(&contents)
             .map_err(|e| GeyserPluginError::ConfigFileReadError { msg: e.to_string() })?;
         this.fill_defaults();
         this.validate()?;
@@ -89,8 +122,8 @@ impl Config {
     }
 
     fn set_default(&mut self, k: &'static str, v: &'static str) {
-        if !self.kafka.contains_key(k) {
-            self.kafka.insert(k.to_owned(), v.to_owned());
+        if !self.kafka.client.contains_key(k) {
+            self.kafka.client.insert(k.to_owned(), v.to_owned());
         }
     }
 
@@ -102,37 +135,41 @@ impl Config {
     }
 
     fn validate(&self) -> PluginResult<()> {
-        if self.update_account_topic.trim().is_empty() {
+        if self.kafka.bootstrap_servers.trim().is_empty() {
             return Err(GeyserPluginError::ConfigFileReadError {
-                msg: "missing required config field `update_account_topic`".to_owned(),
+                msg: "missing required config field `kafka.bootstrap_servers`".to_owned(),
             });
         }
 
-        if self.local_rpc_url.trim().is_empty() {
+        if self.kafka.topic.trim().is_empty() {
             return Err(GeyserPluginError::ConfigFileReadError {
-                msg: "missing required config field `local_rpc_url`".to_owned(),
+                msg: "missing required config field `kafka.topic`".to_owned(),
             });
         }
 
-        if self.admin.port() == 0 {
+        if self.plugin.local_rpc_url.trim().is_empty() {
+            return Err(GeyserPluginError::ConfigFileReadError {
+                msg: "missing required config field `plugin.local_rpc_url`".to_owned(),
+            });
+        }
+
+        if self.plugin.admin.port() == 0 {
             return Err(GeyserPluginError::ConfigFileReadError {
                 msg: "invalid admin address: port 0 is not allowed".to_owned(),
             });
         }
 
-        if let Some(url) = &self.init_tracking_from_ksql_url {
+        if let Some(url) = &self.ksql.url {
             let trimmed = url.trim();
             if trimmed.is_empty() {
                 return Err(GeyserPluginError::ConfigFileReadError {
-                    msg:
-                        "invalid config field `init_tracking_from_ksql_url`: URL must not be empty"
-                            .to_owned(),
+                    msg: "invalid config field `ksql.url`: URL must not be empty".to_owned(),
                 });
             }
 
             let parsed =
                 Url::parse(trimmed).map_err(|error| GeyserPluginError::ConfigFileReadError {
-                    msg: format!("invalid config field `init_tracking_from_ksql_url`: {error}"),
+                    msg: format!("invalid config field `ksql.url`: {error}"),
                 })?;
 
             match parsed.scheme() {
@@ -140,7 +177,7 @@ impl Config {
                 scheme => {
                     return Err(GeyserPluginError::ConfigFileReadError {
                         msg: format!(
-                            "invalid config field `init_tracking_from_ksql_url`: unsupported scheme `{scheme}`"
+                            "invalid config field `ksql.url`: unsupported scheme `{scheme}`"
                         ),
                     });
                 }
@@ -148,8 +185,7 @@ impl Config {
 
             if !parsed.has_host() {
                 return Err(GeyserPluginError::ConfigFileReadError {
-                    msg: "invalid config field `init_tracking_from_ksql_url`: host is required"
-                        .to_owned(),
+                    msg: "invalid config field `ksql.url`: host is required".to_owned(),
                 });
             }
         }
@@ -162,8 +198,8 @@ impl Config {
 mod tests {
     use super::Config;
 
-    fn parse_config(json: &str) -> Result<Config, String> {
-        let mut config: Config = serde_json::from_str(json).map_err(|error| error.to_string())?;
+    fn parse_config(toml: &str) -> Result<Config, String> {
+        let mut config: Config = toml::from_str(toml).map_err(|error| error.to_string())?;
         config.fill_defaults();
         config.validate().map_err(|error| format!("{error:?}"))?;
         Ok(config)
@@ -172,32 +208,37 @@ mod tests {
     #[test]
     fn parses_valid_minimal_config() {
         let config = parse_config(
-            r#"{
-                "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
-                "kafka": {"bootstrap.servers": "localhost:9092"},
-                "update_account_topic": "solana.testnet.account_updates",
-                "local_rpc_url": "http://127.0.0.1:8899",
-                "admin": "127.0.0.1:8080"
-            }"#,
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
         )
         .unwrap();
 
-        assert_eq!(
-            config.update_account_topic,
-            "solana.testnet.account_updates"
-        );
-        assert_eq!(config.local_rpc_url, "http://127.0.0.1:8899");
+        assert_eq!(config.kafka.topic, "solana.testnet.account_updates");
+        assert_eq!(config.plugin.local_rpc_url, "http://127.0.0.1:8899");
     }
 
     #[test]
     fn rejects_missing_admin() {
         let error = parse_config(
-            r#"{
-                "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
-                "kafka": {"bootstrap.servers": "localhost:9092"},
-                "update_account_topic": "solana.testnet.account_updates",
-                "local_rpc_url": "http://127.0.0.1:8899"
-            }"#,
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+"#,
         )
         .unwrap_err();
 
@@ -205,33 +246,59 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_update_account_topic() {
+    fn rejects_missing_kafka_topic() {
         let error = parse_config(
-            r#"{
-                "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
-                "kafka": {"bootstrap.servers": "localhost:9092"},
-                "local_rpc_url": "http://127.0.0.1:8899",
-                "admin": "127.0.0.1:8080"
-            }"#,
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
         )
         .unwrap_err();
 
-        assert!(error.contains("missing field `update_account_topic`"));
+        assert!(error.contains("missing field `topic`"));
+    }
+
+    #[test]
+    fn rejects_missing_bootstrap_servers() {
+        let error = parse_config(
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "   "
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("missing required config field `kafka.bootstrap_servers`"));
     }
 
     #[test]
     fn rejects_legacy_filter_fields() {
         let error = parse_config(
-            r#"{
-                "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
-                "kafka": {"bootstrap.servers": "localhost:9092"},
-                "update_account_topic": "solana.testnet.account_updates",
-                "local_rpc_url": "http://127.0.0.1:8899",
-                "admin": "127.0.0.1:8080",
-                "filters": [
-                    {"update_account_topic": "legacy"}
-                ]
-            }"#,
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+filters = [{ update_account_topic = "legacy" }]
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
         )
         .unwrap_err();
 
@@ -241,83 +308,104 @@ mod tests {
     #[test]
     fn parses_config_with_metrics_enabled() {
         let config = parse_config(
-            r#"{
-                "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
-                "kafka": {"bootstrap.servers": "localhost:9092"},
-                "update_account_topic": "solana.testnet.account_updates",
-                "local_rpc_url": "http://127.0.0.1:8899",
-                "admin": "127.0.0.1:8080",
-                "metrics": true
-            }"#,
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+metrics = true
+"#,
         )
         .unwrap();
 
-        assert!(config.metrics);
+        assert!(config.plugin.metrics);
     }
 
     #[test]
     fn metrics_defaults_to_false() {
         let config = parse_config(
-            r#"{
-                "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
-                "kafka": {"bootstrap.servers": "localhost:9092"},
-                "update_account_topic": "solana.testnet.account_updates",
-                "local_rpc_url": "http://127.0.0.1:8899",
-                "admin": "127.0.0.1:8080"
-            }"#,
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
         )
         .unwrap();
 
-        assert!(!config.metrics);
+        assert!(!config.plugin.metrics);
     }
 
     #[test]
     fn parses_config_without_ksql_startup_restore_url() {
         let config = parse_config(
-            r#"{
-                "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
-                "kafka": {"bootstrap.servers": "localhost:9092"},
-                "update_account_topic": "solana.testnet.account_updates",
-                "local_rpc_url": "http://127.0.0.1:8899",
-                "admin": "127.0.0.1:8080"
-            }"#,
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
         )
         .unwrap();
 
-        assert_eq!(config.init_tracking_from_ksql_url, None);
+        assert_eq!(config.ksql.url, None);
     }
 
     #[test]
     fn parses_config_with_valid_ksql_startup_restore_url() {
         let config = parse_config(
-            r#"{
-                "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
-                "kafka": {"bootstrap.servers": "localhost:9092"},
-                "update_account_topic": "solana.testnet.account_updates",
-                "local_rpc_url": "http://127.0.0.1:8899",
-                "admin": "127.0.0.1:8080",
-                "init_tracking_from_ksql_url": "https://127.0.0.1:8088"
-            }"#,
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[ksql]
+url = "https://127.0.0.1:8088"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
         )
         .unwrap();
 
-        assert_eq!(
-            config.init_tracking_from_ksql_url.as_deref(),
-            Some("https://127.0.0.1:8088")
-        );
+        assert_eq!(config.ksql.url.as_deref(), Some("https://127.0.0.1:8088"));
     }
 
     #[test]
     fn rejects_empty_ksql_startup_restore_url() {
         let error = parse_config(
-            r#"{
-                "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
-                "kafka": {"bootstrap.servers": "localhost:9092"},
-                "update_account_topic": "solana.testnet.account_updates",
-                "local_rpc_url": "http://127.0.0.1:8899",
-                "admin": "127.0.0.1:8080",
-                "init_tracking_from_ksql_url": "   "
-            }"#,
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[ksql]
+url = "   "
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
         )
         .unwrap_err();
 
@@ -327,14 +415,20 @@ mod tests {
     #[test]
     fn rejects_ksql_startup_restore_url_without_scheme() {
         let error = parse_config(
-            r#"{
-                "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
-                "kafka": {"bootstrap.servers": "localhost:9092"},
-                "update_account_topic": "solana.testnet.account_updates",
-                "local_rpc_url": "http://127.0.0.1:8899",
-                "admin": "127.0.0.1:8080",
-                "init_tracking_from_ksql_url": "127.0.0.1:8088"
-            }"#,
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[ksql]
+url = "127.0.0.1:8088"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
         )
         .unwrap_err();
 
@@ -344,17 +438,46 @@ mod tests {
     #[test]
     fn rejects_ksql_startup_restore_url_without_host() {
         let error = parse_config(
-            r#"{
-                "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
-                "kafka": {"bootstrap.servers": "localhost:9092"},
-                "update_account_topic": "solana.testnet.account_updates",
-                "local_rpc_url": "http://127.0.0.1:8899",
-                "admin": "127.0.0.1:8080",
-                "init_tracking_from_ksql_url": "http://:8088"
-            }"#,
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[ksql]
+url = "http://:8088"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
         )
         .unwrap_err();
 
         assert!(error.contains("empty host") || error.contains("host is required"));
+    }
+
+    #[test]
+    fn passes_through_kafka_client_overrides() {
+        let config = parse_config(
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[kafka.client]
+"linger.ms" = "5"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.kafka.client.get("linger.ms"), Some(&"5".to_owned()));
     }
 }

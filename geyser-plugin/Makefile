@@ -8,18 +8,18 @@ ifeq ($(UNAME_S),Darwin)
 	PLUGIN_EXT := dylib
 endif
 PLUGIN_PATH := target/release/libsolana_accountsdb_plugin_kafka.$(PLUGIN_EXT)
-PLUGIN_CONFIG ?= plugin-config.json
+PLUGIN_CONFIG ?= plugin-config.toml
 
 help:
 	@echo "Available targets:"
-	@echo "  make init-config  - Create a local plugin config from configs/plugin-config.example.json"
+	@echo "  make init-config  - Create a local plugin config from configs/plugin-config.example.toml"
 	@echo "  make build-plugin - Compile the plugin (.so/.dylib)"
 	@echo "  make launch       - Launch solana-test-validator with the plugin (depends on build-plugin)"
 	@echo "  make clean        - Remove compiled artifacts"
 
 init-config:
 	@echo "Creating $(PLUGIN_CONFIG)..."
-	@perl -0pe 's|target/release/libsolana_accountsdb_plugin_kafka\.(?:dylib|so)|$(PLUGIN_PATH)|g' configs/plugin-config.example.json > "$(PLUGIN_CONFIG)"
+	@perl -0pe 's|target/release/libsolana_accountsdb_plugin_kafka\.(?:dylib|so)|$(PLUGIN_PATH)|g' configs/plugin-config.example.toml > "$(PLUGIN_CONFIG)"
 	@echo "✓ Created $(PLUGIN_CONFIG)"
 
 build-plugin:
