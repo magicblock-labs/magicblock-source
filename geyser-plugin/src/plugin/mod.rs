@@ -93,10 +93,10 @@ impl GeyserPlugin for KafkaPlugin {
         info!("rd_kafka_version: {:#08x}, {}", version_n, version_s);
 
         let mut producer_config = ClientConfig::new();
-        producer_config.set("bootstrap.servers", &config.kafka.bootstrap_servers);
         for (key, value) in &config.kafka.client {
             producer_config.set(key, value);
         }
+        producer_config.set("bootstrap.servers", &config.kafka.bootstrap_servers);
         let producer = rdkafka::producer::ThreadedProducer::from_config_and_context(
             &producer_config,
             StatsThreadedProducerContext,
@@ -218,9 +218,10 @@ impl KafkaPlugin {
         account_subscriptions: &AccountSubscriptions,
         initial_account_backfill: &InitialAccountBackfill,
     ) -> PluginResult<()> {
-        let Some(url) = config.ksql.url.as_deref() else {
+        let Some(raw_url) = config.ksql.url.as_deref() else {
             return Ok(());
         };
+        let url = raw_url.trim();
 
         let table = &config.ksql.table;
         info!("Startup ksql restore enabled, url={}, table={}", url, table);
