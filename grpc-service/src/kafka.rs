@@ -11,6 +11,7 @@ use tracing::{error, info, warn};
 use crate::config::KafkaConfig;
 use crate::domain::{AccountUpdate, PubkeyFilter, bytes_to_base58};
 use crate::errors::{GeykagError, GeykagResult};
+use crate::traits::AccountUpdateSource;
 pub struct KafkaAccountUpdateStream {
     config: KafkaConfig,
 }
@@ -177,5 +178,18 @@ impl AccountUpdate {
             data_version: account.data_version,
             account_age: account.account_age,
         }
+    }
+}
+
+impl AccountUpdateSource for KafkaAccountUpdateStream {
+    async fn run<H>(
+        &self,
+        filter: Option<&PubkeyFilter>,
+        handler: H,
+    ) -> GeykagResult<()>
+    where
+        H: FnMut(StreamMessage) -> GeykagResult<()>,
+    {
+        self.run(filter, handler).await
     }
 }

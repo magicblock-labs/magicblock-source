@@ -6,6 +6,7 @@ use std::fmt::Write;
 use crate::config::KsqlConfig;
 use crate::domain::{AccountState, PubkeyFilter, bytes_to_base58};
 use crate::errors::{GeykagError, GeykagResult};
+use crate::traits::SnapshotStore;
 
 #[derive(Clone, Debug)]
 pub struct KsqlAccountSnapshotClient {
@@ -254,4 +255,20 @@ fn decode_optional_base64_field(
     }
 
     decode_base64_field(value).map(Some)
+}
+
+impl SnapshotStore for KsqlAccountSnapshotClient {
+    async fn fetch_filtered(
+        &self,
+        filter: Option<&PubkeyFilter>,
+    ) -> GeykagResult<Vec<AccountState>> {
+        self.fetch_filtered(filter).await
+    }
+
+    async fn fetch_one_by_pubkey(
+        &self,
+        pubkey: &PubkeyFilter,
+    ) -> GeykagResult<Option<AccountState>> {
+        self.fetch_one_by_pubkey(pubkey).await
+    }
 }
