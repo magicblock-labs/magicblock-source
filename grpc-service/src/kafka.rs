@@ -29,14 +29,14 @@ impl KafkaAccountUpdateStream {
         H: FnMut(StreamMessage) -> GeykagResult<()>,
     {
         let mut client_config = ClientConfig::new();
+        for (key, value) in &self.config.client {
+            client_config.set(key, value);
+        }
         client_config
             .set("bootstrap.servers", &self.config.bootstrap_servers)
             .set("group.id", &self.config.group_id)
             .set("auto.offset.reset", &self.config.auto_offset_reset)
             .set("enable.auto.commit", "true");
-        for (key, value) in &self.config.client {
-            client_config.set(key, value);
-        }
 
         let consumer: StreamConsumer =
             client_config.create().map_err(|source| {
