@@ -5,64 +5,97 @@ use crate::grpc_service::{GrpcService, GrpcServiceHandle, GrpcSink};
 use crate::kafka::KafkaAccountUpdateStream;
 use crate::ksql::KsqlAccountSnapshotClient;
 use crate::output::{ConsoleSink, TeeSink};
-use crate::traits::{AccountSink, StatusSink};
+use crate::traits::{AccountSink, AccountUpdateSource, SnapshotStore, StatusSink};
 
-pub struct App<A: AccountSink, S: StatusSink> {
+pub struct App<P: SnapshotStore, K: AccountUpdateSource, A: AccountSink, S: StatusSink> {
     config: Config,
-    snapshot_client: KsqlAccountSnapshotClient,
-    kafka_stream: KafkaAccountUpdateStream,
+    snapshot_store: P,
+    account_update_source: K,
     sink: A,
     status_sink: S,
 }
 
-impl App<ConsoleSink, ConsoleSink> {
+impl App<KsqlAccountSnapshotClient, KafkaAccountUpdateStream, ConsoleSink, ConsoleSink> {
     #[allow(dead_code)]
     pub fn new(config: Config) -> GeykagResult<Self> {
-        Self::build(config, ConsoleSink::new(), ConsoleSink::new())
+        let snapshot_store = KsqlAccountSnapshotClient::new(config.ksql.clone())?;
+        let account_update_source = KafkaAccountUpdateStream::new(config.kafka.clone());
+        Ok(Self::build(
+            config,
+            snapshot_store,
+            account_update_source,
+            ConsoleSink::new(),
+            ConsoleSink::new(),
+        ))
     }
 }
 
-impl App<GrpcSink, ConsoleSink> {
+impl App<KsqlAccountSnapshotClient, KafkaAccountUpdateStream, GrpcSink, ConsoleSink> {
     #[allow(dead_code)]
-    pub fn new_grpc(config: Config) -> GeykagResult<(Self, GrpcServiceHandle)> {
+    pub fn new_grpc(
+        config: Config,
+    ) -> GeykagResult<(Self, GrpcServiceHandle)> {
         let grpc = GrpcService::start(&config)?;
         let sink = grpc.sink();
-        let app = Self::build(config, sink, ConsoleSink::new())?;
+        let snapshot_store = KsqlAccountSnapshotClient::new(config.ksql.clone())?;
+        let account_update_source = KafkaAccountUpdateStream::new(config.kafka.clone());
+        let app = Self::build(
+            config,
+            snapshot_store,
+            account_update_source,
+            sink,
+            ConsoleSink::new(),
+        );
 
         Ok((app, grpc))
     }
 }
 
-impl App<TeeSink<GrpcSink, ConsoleSink>, ConsoleSink> {
+impl App<
+    KsqlAccountSnapshotClient,
+    KafkaAccountUpdateStream,
+    TeeSink<GrpcSink, ConsoleSink>,
+    ConsoleSink,
+> {
     pub fn new_grpc_with_console(
         config: Config,
     ) -> GeykagResult<(Self, GrpcServiceHandle)> {
         let grpc = GrpcService::start(&config)?;
         let sink = TeeSink::new(grpc.sink(), ConsoleSink::new());
-        let app = Self::build(config, sink, ConsoleSink::new())?;
+        let snapshot_store = KsqlAccountSnapshotClient::new(config.ksql.clone())?;
+        let account_update_source = KafkaAccountUpdateStream::new(config.kafka.clone());
+        let app = Self::build(
+            config,
+            snapshot_store,
+            account_update_source,
+            sink,
+            ConsoleSink::new(),
+        );
 
         Ok((app, grpc))
     }
 }
 
-impl<A: AccountSink, S: StatusSink> App<A, S> {
-    fn build(config: Config, sink: A, status_sink: S) -> GeykagResult<Self> {
-        let snapshot_client =
-            KsqlAccountSnapshotClient::new(config.ksql.clone())?;
-        let kafka_stream = KafkaAccountUpdateStream::new(config.kafka.clone());
-
-        Ok(Self {
+impl<P: SnapshotStore, K: AccountUpdateSource, A: AccountSink, S: StatusSink> App<P, K, A, S> {
+    pub fn build(
+        config: Config,
+        snapshot_store: P,
+        account_update_source: K,
+        sink: A,
+        status_sink: S,
+    ) -> Self {
+        Self {
             config,
-            snapshot_client,
-            kafka_stream,
+            snapshot_store,
+            account_update_source,
             sink,
             status_sink,
-        })
+        }
     }
 
     pub async fn run(&self) -> GeykagResult<()> {
         let snapshots = self
-            .snapshot_client
+            .snapshot_store
             .fetch_filtered(self.config.pubkey_filter.as_ref())
             .await?;
 
@@ -83,7 +116,7 @@ impl<A: AccountSink, S: StatusSink> App<A, S> {
             }
         }
 
-        self.kafka_stream
+        self.account_update_source
             .run(self.config.pubkey_filter.as_ref(), |message| {
                 let event = AccountEvent::Live(message);
                 self.sink.write_event(&event)
