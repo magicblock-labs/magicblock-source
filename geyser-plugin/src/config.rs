@@ -188,6 +188,12 @@ impl Config {
                     msg: "invalid config field `ksql.url`: host is required".to_owned(),
                 });
             }
+
+            if self.ksql.table.trim().is_empty() {
+                return Err(GeyserPluginError::ConfigFileReadError {
+                    msg: "invalid config field `ksql.table`: table must not be empty".to_owned(),
+                });
+            }
         }
 
         Ok(())
