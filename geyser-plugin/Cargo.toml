@@ -1,0 +1,53 @@
+[package]
+name = "solana-accountsdb-plugin-kafka"
+description = "Solana AccountsDb plugin for Kafka"
+authors = ["Blockdaemon"]
+version = "0.2.2+agave.4.0.0-beta.2"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/Blockdaemon/solana-accountsdb-plugin-kafka"
+homepage = "https://blockdaemon.com"
+keywords = ["solana", "blockchain", "kafka", "plugin"]
+categories = ["cryptography::cryptocurrencies", "database", "network-programming"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+agave-geyser-plugin-interface = { version = "4.0.0-beta.4" }
+agave-logger = { version = "4.0.0-beta.4", features = ["agave-unstable-api"] }
+solana-message = { version = "~3.1" }
+solana-account = "~3.4"
+solana-commitment-config = "3.1.1"
+solana-pubkey = { version = "~4.1" }
+solana-rpc-client = { version = "4.0.0-beta.4", default-features = false }
+solana-transaction-status = { version = "4.0.0-beta" }
+solana-transaction-status-client-types = { version = "4.0.0-beta" }
+
+bytes = "1.11.1"
+base64 = "0.22.1"
+dashmap = "6.1.0"
+http = "1.4.0"
+http-body-util = "0.1.3"
+hyper = { version = "1.8.1", features = ["http1", "server"] }
+hyper-util = { version = "0.1.20", features = ["tokio", "server"] }
+lazy_static = "1.5.0"
+log = "0.4.29"
+magigblock-event-proto = { path = "../event-proto" }
+prometheus = "0.14.0"
+prost = "0.14.3"
+rdkafka = { version = "0.39.0", features = ["ssl", "sasl"] }
+reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = { version = "1.0.149" }
+tokio = { version = "1.50.0", features = ["rt-multi-thread", "time", "macros", "sync", "net"] }
+tower = { version = "0.5.3", features = ["make"] }
+
+[build-dependencies]
+anyhow = "1.0.102"
+cargo-lock = "11.0.1"
+git-version = "0.3.9"
+vergen = { version = "9.1.0", features = ["build", "rustc"] }
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]

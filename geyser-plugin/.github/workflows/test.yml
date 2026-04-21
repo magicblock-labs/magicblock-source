@@ -1,0 +1,55 @@
+# Source:
+# https://github.com/solana-labs/solana-accountsdb-plugin-postgres/blob/master/.github/workflows/test.yml
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Install build requirements
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gnupg \
+            libudev-dev \
+            libsasl2-dev \
+            libssl-dev \
+            libzstd-dev
+          sudo apt-get satisfy -f -y "protobuf-compiler (>=3.15)"
+
+      - name: Install cargo-cache
+        # Run without --locked to avoid yanked transitive deps (e.g. crossbeam-channel 0.5.6)
+        run: cargo install cargo-cache
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-build-
+
+      - name: Clean cargo cache
+        run: cargo cache --autoclean
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- --deny=warnings
+
+      - name: Build
+        run: ./ci/cargo-build-test.sh
