@@ -22,9 +22,9 @@ same workspace checks on every push and pull request:
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --no-deps -- -D warnings
 cargo build --workspace
-cargo nextest run -j16 --workspace
+cargo test --workspace -- --test-threads=16
 ```
 
 ## Common Root Workflows
