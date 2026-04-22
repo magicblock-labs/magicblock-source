@@ -1,3 +1,7 @@
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_signer::Signer;
+
 use crate::scenario::ScenarioName;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -215,19 +219,31 @@ fn derive_seed(scenario: ScenarioName, account: NamedAccount) -> [u8; 32] {
 }
 
 pub struct ScenarioAccounts {
-    seeds: [[u8; 32]; ACCOUNT_COUNT],
+    keypairs: Vec<Keypair>,
 }
 
+#[allow(dead_code)]
 impl ScenarioAccounts {
     pub fn for_scenario(name: ScenarioName) -> Self {
-        let mut seeds = [[0u8; 32]; ACCOUNT_COUNT];
-        for account in NamedAccount::all() {
-            seeds[account.index()] = derive_seed(name, *account);
-        }
-        Self { seeds }
+        let keypairs = NamedAccount::all()
+            .iter()
+            .map(|account| {
+                let seed = derive_seed(name, *account);
+                Keypair::new_from_array(seed)
+            })
+            .collect();
+        Self { keypairs }
+    }
+
+    pub fn keypair(&self, account: NamedAccount) -> &Keypair {
+        &self.keypairs[account.index()]
+    }
+
+    pub fn pubkey(&self, account: NamedAccount) -> Pubkey {
+        self.keypairs[account.index()].pubkey()
     }
 
     pub fn pubkey_b58(&self, account: NamedAccount) -> String {
-        bs58::encode(&self.seeds[account.index()]).into_string()
+        self.pubkey(account).to_string()
     }
 }

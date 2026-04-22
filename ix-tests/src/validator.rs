@@ -1,0 +1,155 @@
+use std::time::Duration;
+
+use anyhow::Context;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_signer::Signer;
+use solana_system_interface::instruction as system_instruction;
+use solana_transaction::Transaction;
+use tracing::info;
+
+use crate::config::SuiteConfig;
+
+pub struct ValidatorDriver {
+    rpc: RpcClient,
+    payer: Keypair,
+    transaction_timeout: Duration,
+}
+
+impl ValidatorDriver {
+    pub fn new(config: &SuiteConfig) -> Self {
+        let rpc = RpcClient::new(config.validator_rpc_url.clone());
+        let payer = Keypair::new();
+        let transaction_timeout =
+            Duration::from_millis(config.transaction_timeout_ms);
+        Self {
+            rpc,
+            payer,
+            transaction_timeout,
+        }
+    }
+
+    pub async fn fund_payer(&self) -> anyhow::Result<()> {
+        let lamports = 10_000_000_000; // 10 SOL
+        let sig = self
+            .rpc
+            .request_airdrop(&self.payer.pubkey(), lamports)
+            .await
+            .context("fund_payer: request_airdrop failed")?;
+        self.confirm_signature(&sig).await?;
+        info!(
+            payer = %self.payer.pubkey(),
+            lamports,
+            "funded payer"
+        );
+        Ok(())
+    }
+
+    pub async fn airdrop(
+        &self,
+        pubkey: &Pubkey,
+        lamports: u64,
+    ) -> anyhow::Result<String> {
+        let sig = self
+            .rpc
+            .request_airdrop(pubkey, lamports)
+            .await
+            .with_context(|| {
+                format!("airdrop to {pubkey} of {lamports} failed")
+            })?;
+        self.confirm_signature(&sig).await?;
+        info!(%pubkey, lamports, %sig, "airdrop confirmed");
+        Ok(sig.to_string())
+    }
+
+    pub async fn transfer(
+        &self,
+        from: &Keypair,
+        to: &Pubkey,
+        lamports: u64,
+    ) -> anyhow::Result<String> {
+        let ix = system_instruction::transfer(&from.pubkey(), to, lamports);
+        let blockhash = self
+            .rpc
+            .get_latest_blockhash()
+            .await
+            .context("transfer: get_latest_blockhash failed")?;
+        let mut tx = Transaction::new_with_payer(&[ix], Some(&from.pubkey()));
+        tx.sign(&[from], blockhash);
+        let sig = self
+            .rpc
+            .send_and_confirm_transaction(&tx)
+            .await
+            .with_context(|| {
+                format!(
+                    "transfer {} lamports from {} to {} failed",
+                    lamports,
+                    from.pubkey(),
+                    to
+                )
+            })?;
+        info!(from = %from.pubkey(), %to, lamports, %sig, "transfer confirmed");
+        Ok(sig.to_string())
+    }
+
+    pub async fn allocate_and_assign(
+        &self,
+        target: &Keypair,
+        space: u64,
+        new_owner: Pubkey,
+    ) -> anyhow::Result<String> {
+        let alloc_ix = system_instruction::allocate(&target.pubkey(), space);
+        let assign_ix =
+            system_instruction::assign(&target.pubkey(), &new_owner);
+        let blockhash = self
+            .rpc
+            .get_latest_blockhash()
+            .await
+            .context("allocate_and_assign: get_latest_blockhash failed")?;
+        let mut tx = Transaction::new_with_payer(
+            &[alloc_ix, assign_ix],
+            Some(&self.payer.pubkey()),
+        );
+        tx.sign(&[&self.payer, target], blockhash);
+        let sig = self
+            .rpc
+            .send_and_confirm_transaction(&tx)
+            .await
+            .with_context(|| {
+                format!(
+                    "allocate_and_assign for {} (space={}, owner={}) failed",
+                    target.pubkey(),
+                    space,
+                    new_owner
+                )
+            })?;
+        info!(
+            target = %target.pubkey(),
+            space,
+            new_owner = %new_owner,
+            %sig,
+            "allocate_and_assign confirmed"
+        );
+        Ok(sig.to_string())
+    }
+
+    async fn confirm_signature(
+        &self,
+        sig: &solana_signature::Signature,
+    ) -> anyhow::Result<()> {
+        let deadline = tokio::time::Instant::now() + self.transaction_timeout;
+        loop {
+            if self.rpc.confirm_transaction(sig).await.unwrap_or(false) {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                anyhow::bail!(
+                    "transaction {sig} not confirmed within {:?}",
+                    self.transaction_timeout
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+}

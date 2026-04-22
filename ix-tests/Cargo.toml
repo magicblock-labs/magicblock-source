@@ -16,8 +16,8 @@ solana-pubkey = "4.1.0"
 solana-rpc-client = { version = "4.0.0-beta.4", default-features = false }
 solana-signature = "3.4.0"
 solana-signer = "3.0.0"
-solana-system-interface = "3.2.0"
-solana-transaction = "3.1.0"
+solana-system-interface = { version = "3.2.0", features = ["bincode"] }
+solana-transaction = { version = "3.1.0", features = ["bincode"] }
 tokio = { version = "1.47", features = ["macros", "rt-multi-thread", "process", "sync", "time", "fs", "signal"] }
 tokio-stream = "0.1"
 toml = "0.9.12"

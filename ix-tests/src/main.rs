@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 mod accounts;
 mod artifacts;
 mod cli;
@@ -11,12 +10,16 @@ mod observation;
 mod runner;
 mod scenario;
 mod service;
+#[allow(dead_code)]
+mod validator;
 
 use tracing::info;
 
+use crate::accounts::{NamedAccount, ScenarioAccounts};
 use crate::layout::ServiceInstance;
 use crate::scenario::ScenarioName;
 use crate::service::{ServiceController, ServiceSpec};
+use crate::validator::ValidatorDriver;
 
 fn init_tracing() {
     tracing_subscriber::fmt()
@@ -61,6 +64,15 @@ async fn main() -> anyhow::Result<()> {
         if *scenario == ScenarioName::SingleBasic {
             let spec = ServiceSpec::for_instance(ServiceInstance::One);
             let svc = controller.start(&spec, &artifacts).await?;
+
+            let accounts =
+                ScenarioAccounts::for_scenario(ScenarioName::SingleBasic);
+            let validator = ValidatorDriver::new(&config);
+            validator.fund_payer().await?;
+            validator
+                .airdrop(&accounts.pubkey(NamedAccount::SimpleA), 1_000_000)
+                .await?;
+
             controller.shutdown(svc).await?;
         }
 
