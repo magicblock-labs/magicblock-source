@@ -4,6 +4,7 @@ mod cli;
 #[allow(dead_code)]
 mod client;
 mod config;
+mod expectation;
 mod layout;
 #[allow(dead_code)]
 mod observation;
@@ -16,6 +17,8 @@ mod validator;
 use tracing::info;
 
 use crate::accounts::{NamedAccount, ScenarioAccounts};
+use crate::client::TestGrpcClient;
+use crate::expectation::{CheckpointRunner, CheckpointSpec, ClientCursor};
 use crate::layout::ServiceInstance;
 use crate::scenario::ScenarioName;
 use crate::service::{ServiceController, ServiceSpec};
@@ -71,6 +74,17 @@ async fn main() -> anyhow::Result<()> {
             validator.fund_payer().await?;
             validator
                 .airdrop(&accounts.pubkey(NamedAccount::SimpleA), 1_000_000)
+                .await?;
+
+            let checkpoint_runner = CheckpointRunner::new(&config);
+            let checkpoint = CheckpointSpec {
+                name: "empty",
+                clients: Vec::new(),
+            };
+            let clients: Vec<TestGrpcClient> = Vec::new();
+            let mut cursors: Vec<ClientCursor> = Vec::new();
+            checkpoint_runner
+                .wait_until_satisfied(&checkpoint, &clients, &mut cursors)
                 .await?;
 
             controller.shutdown(svc).await?;
