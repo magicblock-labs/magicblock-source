@@ -1,0 +1,101 @@
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use anyhow::Context;
+
+use crate::config::SuiteConfig;
+use crate::layout::ServiceInstance;
+use crate::scenario::ScenarioName;
+
+#[allow(dead_code)]
+pub struct ServiceLogPaths {
+    pub stdout: PathBuf,
+    pub stderr: PathBuf,
+}
+
+#[allow(dead_code)]
+pub struct RunArtifacts {
+    run_dir: PathBuf,
+    failure_root: PathBuf,
+    persist_on_failure: bool,
+}
+
+impl RunArtifacts {
+    pub fn new(
+        config: &SuiteConfig,
+        scenario: ScenarioName,
+    ) -> anyhow::Result<Self> {
+        let pid = std::process::id();
+        let run_dir = PathBuf::from(format!(
+            "target/ix-tests/tmp/{}-{}",
+            scenario.as_str(),
+            pid
+        ));
+        std::fs::create_dir_all(&run_dir).with_context(|| {
+            format!("failed to create run dir: {}", run_dir.display())
+        })?;
+
+        Ok(Self {
+            run_dir,
+            failure_root: config.failure_artifact_root.clone(),
+            persist_on_failure: true,
+        })
+    }
+
+    #[allow(dead_code)]
+    pub fn service_logs(&self, instance: ServiceInstance) -> ServiceLogPaths {
+        let label = match instance {
+            ServiceInstance::One => "service-1",
+            ServiceInstance::Two => "service-2",
+        };
+        ServiceLogPaths {
+            stdout: self.run_dir.join(format!("{label}.stdout.log")),
+            stderr: self.run_dir.join(format!("{label}.stderr.log")),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn client_updates_path(&self, scenario: ScenarioName) -> PathBuf {
+        self.run_dir
+            .join(format!("{}-client-updates.json", scenario.as_str()))
+    }
+
+    #[allow(dead_code)]
+    pub fn persist_failure(&self) -> anyhow::Result<()> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let scenario_name = self
+            .run_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        let dest = self
+            .failure_root
+            .join(format!("{scenario_name}-{timestamp}"));
+        std::fs::create_dir_all(&self.failure_root).with_context(|| {
+            format!(
+                "failed to create failure root: {}",
+                self.failure_root.display()
+            )
+        })?;
+        std::fs::rename(&self.run_dir, &dest).with_context(|| {
+            format!(
+                "failed to move run dir {} to {}",
+                self.run_dir.display(),
+                dest.display()
+            )
+        })?;
+        Ok(())
+    }
+
+    pub fn cleanup_success(&self) -> anyhow::Result<()> {
+        if self.run_dir.exists() {
+            std::fs::remove_dir_all(&self.run_dir).with_context(|| {
+                format!("failed to remove run dir: {}", self.run_dir.display())
+            })?;
+        }
+        Ok(())
+    }
+}

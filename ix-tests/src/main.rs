@@ -1,5 +1,11 @@
+#[allow(dead_code)]
+mod accounts;
+mod artifacts;
 mod cli;
 mod config;
+#[allow(dead_code)]
+mod layout;
+mod runner;
 mod scenario;
 
 use tracing::info;
@@ -19,11 +25,11 @@ fn main() -> anyhow::Result<()> {
 
     let cli = cli::Cli::parse()?;
     let config = config::SuiteConfig::load(&cli.config_path)?;
-    let scenario = scenario::ScenarioName::parse(&cli.scenario)?;
+    let requested = scenario::ScenarioName::parse(&cli.scenario)?;
 
     info!(
         config_path = %cli.config_path.display(),
-        scenario = scenario.as_str(),
+        scenario = requested.as_str(),
         service_binary = %config.service_binary.display(),
         validator_rpc_url = %config.validator_rpc_url,
         failure_artifact_root = %config.failure_artifact_root.display(),
@@ -32,6 +38,17 @@ fn main() -> anyhow::Result<()> {
         transaction_timeout_ms = config.transaction_timeout_ms,
         "loaded integration test suite config"
     );
+
+    let scenarios = runner::ordered_scenarios(requested);
+    let names: Vec<&str> = scenarios.iter().map(|s| s.as_str()).collect();
+    info!(scenarios = ?names, "resolved scenario execution order");
+
+    for scenario in &scenarios {
+        info!(scenario = scenario.as_str(), "running scenario");
+        let artifacts = artifacts::RunArtifacts::new(&config, *scenario)?;
+        artifacts.cleanup_success()?;
+        info!(scenario = scenario.as_str(), "scenario passed");
+    }
 
     Ok(())
 }
