@@ -384,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_account_maps_to_expected_update_event() {
+    fn test_existing_account_maps_to_expected_update_event() {
         let event = rpc::map_existing_account(
             Account {
                 lamports: 42,
@@ -412,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_account_maps_to_sentinel_event() {
+    fn test_missing_account_maps_to_sentinel_event() {
         let event = rpc::map_missing_account(55, pk(2));
 
         assert_eq!(event.slot, 55);
@@ -430,7 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn enqueue_marks_pubkeys_in_flight() {
+    fn test_enqueue_marks_pubkeys_in_flight() {
         let (inner, _rx) = test_inner(4);
         let handle = InitialAccountBackfillHandle { inner };
 
@@ -443,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn mark_live_update_seen_flips_in_flight_state() {
+    fn test_mark_live_update_seen_flips_in_flight_state() {
         let (inner, _rx) = test_inner(4);
         let handle = InitialAccountBackfillHandle { inner };
         let pubkey = pk(3);
@@ -462,7 +462,7 @@ mod tests {
     }
 
     #[test]
-    fn complete_backfill_event_suppresses_when_live_update_won_race() {
+    fn test_complete_backfill_event_suppresses_when_live_update_won_race() {
         let (inner, _rx) = test_inner(4);
         let handle = InitialAccountBackfillHandle {
             inner: inner.clone(),
@@ -478,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn enqueue_failure_cleans_up_temporary_in_flight_markers() {
+    fn test_enqueue_failure_cleans_up_temporary_in_flight_markers() {
         let (inner, mut rx) = test_inner(1);
         inner
             .tx

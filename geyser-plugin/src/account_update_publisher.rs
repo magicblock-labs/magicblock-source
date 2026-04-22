@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn confirmed_startup_replay_updates_are_suppressed() {
+    fn test_confirmed_startup_replay_updates_are_suppressed() {
         assert!(matches!(
             should_publish_confirmed_account(&AccountSubscriptions::new(), &sample_event(true)),
             AccountUpdatePublishOutcome::SkippedStartupReplay
@@ -173,7 +173,7 @@ mod tests {
     }
 
     #[test]
-    fn backfill_snapshots_are_suppressed_after_live_updates() {
+    fn test_backfill_snapshots_are_suppressed_after_live_updates() {
         assert!(matches!(
             should_publish_backfill_account(&AccountSubscriptions::new(), [7; 32], true),
             AccountUpdatePublishOutcome::SkippedLiveUpdateWon

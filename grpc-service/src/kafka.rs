@@ -11,6 +11,7 @@ use tracing::{error, info, warn};
 use crate::config::KafkaConfig;
 use crate::domain::{AccountUpdate, PubkeyFilter, bytes_to_base58};
 use crate::errors::{GeykagError, GeykagResult};
+use crate::traits::AccountUpdateSource;
 pub struct KafkaAccountUpdateStream {
     config: KafkaConfig,
 }
@@ -177,5 +178,204 @@ impl AccountUpdate {
             data_version: account.data_version,
             account_age: account.account_age,
         }
+    }
+}
+
+impl AccountUpdateSource for KafkaAccountUpdateStream {
+    async fn run<H>(
+        &self,
+        filter: Option<&PubkeyFilter>,
+        handler: H,
+    ) -> GeykagResult<()>
+    where
+        H: FnMut(StreamMessage) -> GeykagResult<()> + Send,
+    {
+        KafkaAccountUpdateStream::run(self, filter, handler).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use prost::Message;
+
+    use super::{
+        decode_account_update, decode_raw_account_update,
+        strip_confluent_protobuf_framing,
+    };
+    use crate::domain::AccountUpdate;
+    use crate::errors::GeykagError;
+    use magigblock_event_proto::{
+        MessageWrapper, UpdateAccountEvent, message_wrapper,
+    };
+
+    fn sample_account_event() -> UpdateAccountEvent {
+        UpdateAccountEvent {
+            slot: 42,
+            pubkey: (1..=32).collect(),
+            lamports: 500,
+            owner: (32..64).collect(),
+            executable: true,
+            rent_epoch: 7,
+            data: b"payload".to_vec(),
+            write_version: 88,
+            txn_signature: Some(vec![7; 64]),
+            data_version: 3,
+            is_startup: false,
+            account_age: 11,
+        }
+    }
+
+    fn wrapped_account_event() -> MessageWrapper {
+        MessageWrapper {
+            event_message: Some(message_wrapper::EventMessage::Account(
+                Box::new(sample_account_event()),
+            )),
+        }
+    }
+
+    fn bare_payload_bytes() -> Vec<u8> {
+        sample_account_event().encode_to_vec()
+    }
+
+    fn wrapped_payload_bytes() -> Vec<u8> {
+        wrapped_account_event().encode_to_vec()
+    }
+
+    fn confluent_framed_payload_bytes(payload: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0, 0, 0, 0, 0, 0];
+        bytes.extend_from_slice(payload);
+        bytes
+    }
+
+    #[test]
+    fn test_strip_confluent_protobuf_framing_returns_stripped_payload() {
+        let payload = bare_payload_bytes();
+        let framed = confluent_framed_payload_bytes(&payload);
+
+        assert_eq!(
+            strip_confluent_protobuf_framing(&framed),
+            Some(payload.as_slice())
+        );
+    }
+
+    #[test]
+    fn test_strip_confluent_protobuf_framing_rejects_short_payloads() {
+        assert_eq!(strip_confluent_protobuf_framing(&[0, 0, 0, 0, 0]), None);
+    }
+
+    #[test]
+    fn test_strip_confluent_protobuf_framing_rejects_wrong_magic_byte() {
+        let payload = bare_payload_bytes();
+        let mut framed = confluent_framed_payload_bytes(&payload);
+        framed[0] = 1;
+
+        assert_eq!(strip_confluent_protobuf_framing(&framed), None);
+    }
+
+    #[test]
+    fn test_strip_confluent_protobuf_framing_rejects_wrong_message_index_byte()
+    {
+        let payload = bare_payload_bytes();
+        let mut framed = confluent_framed_payload_bytes(&payload);
+        framed[5] = 1;
+
+        assert_eq!(strip_confluent_protobuf_framing(&framed), None);
+    }
+
+    #[test]
+    fn test_decode_raw_account_update_decodes_bare_update_account_event() {
+        let account = decode_raw_account_update(&bare_payload_bytes()).unwrap();
+
+        assert_eq!(account.slot, 42);
+        assert_eq!(account.lamports, 500);
+        assert_eq!(account.data_len, 7);
+    }
+
+    #[test]
+    fn test_decode_raw_account_update_decodes_wrapped_message_wrapper_account()
+    {
+        let account =
+            decode_raw_account_update(&wrapped_payload_bytes()).unwrap();
+
+        assert_eq!(account.slot, 42);
+        assert_eq!(account.write_version, 88);
+        assert_eq!(account.account_age, 11);
+    }
+
+    #[test]
+    fn test_decode_raw_account_update_rejects_wrapper_without_payload() {
+        let payload = MessageWrapper {
+            event_message: None,
+        }
+        .encode_to_vec();
+        let error = decode_raw_account_update(&payload).unwrap_err();
+
+        assert!(matches!(error, GeykagError::MissingMessageWrapperPayload));
+    }
+
+    #[test]
+    fn test_decode_raw_account_update_rejects_invalid_protobuf_bytes() {
+        let error = decode_raw_account_update(&[0xff, 0x01, 0x02]).unwrap_err();
+
+        assert!(matches!(
+            error,
+            GeykagError::InvalidAccountUpdatePayload { .. }
+        ));
+    }
+
+    #[test]
+    fn test_decode_account_update_prefers_direct_raw_decode() {
+        let account = decode_account_update(&bare_payload_bytes()).unwrap();
+
+        assert_eq!(account.slot, 42);
+        assert_eq!(account.pubkey_bytes, (1..=32).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_decode_account_update_falls_back_to_stripped_confluent_frame() {
+        let framed = confluent_framed_payload_bytes(&wrapped_payload_bytes());
+        let account = decode_account_update(&framed).unwrap();
+
+        assert_eq!(
+            account.owner_b58,
+            "3ARMH9zfVCnU2TKiphU4xcEyWdA45fc1sjKEtYMdf3gr"
+        );
+    }
+
+    #[test]
+    fn test_decode_account_update_rejects_unknown_payload_encoding() {
+        let error = decode_account_update(&[1, 2, 3, 4, 5, 6, 7]).unwrap_err();
+
+        assert!(matches!(error, GeykagError::UnsupportedPayloadEncoding));
+    }
+
+    #[test]
+    fn test_account_update_from_proto_maps_all_fields() {
+        let account = AccountUpdate::from_proto(sample_account_event());
+
+        assert_eq!(
+            account.pubkey_b58,
+            "4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw"
+        );
+        assert_eq!(account.pubkey_bytes, (1..=32).collect::<Vec<_>>());
+        assert_eq!(
+            account.owner_b58,
+            "3ARMH9zfVCnU2TKiphU4xcEyWdA45fc1sjKEtYMdf3gr"
+        );
+        assert_eq!(account.slot, 42);
+        assert_eq!(account.lamports, 500);
+        assert!(account.executable);
+        assert_eq!(account.rent_epoch, 7);
+        assert_eq!(account.write_version, 88);
+        assert_eq!(
+            account.txn_signature_b58,
+            Some(
+                "99eUso3aSbE9tqGSTXzo3TLfKb9RkMTURrHKQ1K7Zh3BbeqPevr5E1iCbpTjqHuTFLtfxTTD5ekfVuZFzQyEQf8"
+                    .to_owned()
+            )
+        );
+        assert_eq!(account.data_len, 7);
+        assert_eq!(account.data_version, 3);
+        assert_eq!(account.account_age, 11);
     }
 }

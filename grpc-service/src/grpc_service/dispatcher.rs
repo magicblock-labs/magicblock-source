@@ -529,3 +529,400 @@ impl DispatcherHandle {
             .await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use helius_laserstream::grpc::{
+        SubscribeUpdate, SubscribeUpdateAccount, SubscribeUpdateAccountInfo,
+        SubscribeUpdatePing, subscribe_update::UpdateOneof,
+    };
+    use tokio::sync::mpsc;
+    use tokio::time::timeout;
+
+    use super::{
+        ClientHealth, ClientRemovalReason, DeliveryFailureKind,
+        DeliveryOutcome, DispatcherHandle, MAX_BACKPRESSURE_AGE,
+        MAX_CONSECUTIVE_DELIVERY_FAILURES, TargetedSendResult,
+        evaluate_client_health, extract_pubkey, record_delivery_outcome,
+        try_deliver_update,
+    };
+
+    fn pubkey(byte: u8) -> [u8; 32] {
+        [byte; 32]
+    }
+
+    fn update_for_pubkey(pubkey: [u8; 32]) -> SubscribeUpdate {
+        SubscribeUpdate {
+            filters: Vec::new(),
+            created_at: None,
+            update_oneof: Some(UpdateOneof::Account(SubscribeUpdateAccount {
+                account: Some(SubscribeUpdateAccountInfo {
+                    pubkey: pubkey.to_vec(),
+                    lamports: 1,
+                    owner: vec![9; 32],
+                    executable: false,
+                    rent_epoch: 2,
+                    data: Vec::new(),
+                    write_version: 3,
+                    txn_signature: None,
+                }),
+                slot: 7,
+                is_startup: false,
+            })),
+        }
+    }
+
+    fn non_account_update() -> SubscribeUpdate {
+        SubscribeUpdate {
+            filters: Vec::new(),
+            created_at: None,
+            update_oneof: Some(UpdateOneof::Ping(SubscribeUpdatePing {})),
+        }
+    }
+
+    fn invalid_pubkey_len_update() -> SubscribeUpdate {
+        SubscribeUpdate {
+            filters: Vec::new(),
+            created_at: None,
+            update_oneof: Some(UpdateOneof::Account(SubscribeUpdateAccount {
+                account: Some(SubscribeUpdateAccountInfo {
+                    pubkey: vec![1; 31],
+                    lamports: 1,
+                    owner: vec![2; 32],
+                    executable: false,
+                    rent_epoch: 3,
+                    data: Vec::new(),
+                    write_version: 4,
+                    txn_signature: None,
+                }),
+                slot: 8,
+                is_startup: false,
+            })),
+        }
+    }
+
+    fn health_with(
+        consecutive_failures: u32,
+        last_success_at: Option<std::time::Instant>,
+        last_failure_at: Option<std::time::Instant>,
+        backpressure_since: Option<std::time::Instant>,
+        last_failure_kind: Option<DeliveryFailureKind>,
+    ) -> ClientHealth {
+        ClientHealth {
+            consecutive_failures,
+            last_success_at,
+            last_failure_at,
+            backpressure_since,
+            last_failure_kind,
+        }
+    }
+
+    #[test]
+    fn test_extract_pubkey_returns_account_pubkey() {
+        let update = update_for_pubkey(pubkey(1));
+
+        assert_eq!(extract_pubkey(&update), Some(&pubkey(1)));
+    }
+
+    #[test]
+    fn test_extract_pubkey_rejects_non_account_update() {
+        assert_eq!(extract_pubkey(&non_account_update()), None);
+    }
+
+    #[test]
+    fn test_extract_pubkey_rejects_invalid_pubkey_length() {
+        assert_eq!(extract_pubkey(&invalid_pubkey_len_update()), None);
+    }
+
+    #[tokio::test]
+    async fn test_try_deliver_update_reports_delivery() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let update = Arc::new(update_for_pubkey(pubkey(1)));
+
+        let outcome = try_deliver_update(&tx, &update);
+
+        assert_eq!(outcome, DeliveryOutcome::Delivered);
+        let delivered = rx.recv().await.unwrap();
+        assert_eq!(extract_pubkey(&delivered), Some(&pubkey(1)));
+    }
+
+    #[tokio::test]
+    async fn test_try_deliver_update_reports_channel_full() {
+        let (tx, _rx) = mpsc::channel(1);
+        let first = Arc::new(update_for_pubkey(pubkey(1)));
+        let second = Arc::new(update_for_pubkey(pubkey(2)));
+
+        assert_eq!(try_deliver_update(&tx, &first), DeliveryOutcome::Delivered);
+        assert_eq!(
+            try_deliver_update(&tx, &second),
+            DeliveryOutcome::Failed(DeliveryFailureKind::ChannelFull)
+        );
+    }
+
+    #[test]
+    fn test_record_delivery_outcome_resets_health_on_success() {
+        let now = std::time::Instant::now();
+        let mut health = health_with(
+            3,
+            None,
+            Some(now - Duration::from_secs(1)),
+            Some(now - Duration::from_secs(2)),
+            Some(DeliveryFailureKind::ChannelFull),
+        );
+
+        record_delivery_outcome(&mut health, DeliveryOutcome::Delivered, now);
+
+        assert_eq!(health.consecutive_failures, 0);
+        assert_eq!(health.last_success_at, Some(now));
+        assert_eq!(health.backpressure_since, None);
+        assert_eq!(health.last_failure_kind, None);
+    }
+
+    #[test]
+    fn test_record_delivery_outcome_tracks_backpressure_failure() {
+        let now = std::time::Instant::now();
+        let mut health = ClientHealth::default();
+
+        record_delivery_outcome(
+            &mut health,
+            DeliveryOutcome::Failed(DeliveryFailureKind::ChannelFull),
+            now,
+        );
+
+        assert_eq!(health.consecutive_failures, 1);
+        assert_eq!(health.last_failure_at, Some(now));
+        assert_eq!(health.backpressure_since, Some(now));
+        assert_eq!(
+            health.last_failure_kind,
+            Some(DeliveryFailureKind::ChannelFull)
+        );
+    }
+
+    #[test]
+    fn test_evaluate_client_health_removes_closed_channels() {
+        let now = std::time::Instant::now();
+        let health = health_with(
+            1,
+            None,
+            Some(now),
+            None,
+            Some(DeliveryFailureKind::ChannelClosed),
+        );
+
+        assert_eq!(
+            evaluate_client_health(&health, now),
+            Some(ClientRemovalReason::ClosedChannel)
+        );
+    }
+
+    #[test]
+    fn test_evaluate_client_health_removes_excessive_failures() {
+        let now = std::time::Instant::now();
+        let health = health_with(
+            MAX_CONSECUTIVE_DELIVERY_FAILURES,
+            None,
+            Some(now),
+            Some(now),
+            Some(DeliveryFailureKind::ChannelFull),
+        );
+
+        assert_eq!(
+            evaluate_client_health(&health, now),
+            Some(ClientRemovalReason::ConsecutiveFailures)
+        );
+    }
+
+    #[test]
+    fn test_evaluate_client_health_removes_stale_backpressure() {
+        let now = std::time::Instant::now();
+        let health = health_with(
+            1,
+            None,
+            Some(now),
+            Some(now - MAX_BACKPRESSURE_AGE),
+            Some(DeliveryFailureKind::ChannelFull),
+        );
+
+        assert_eq!(
+            evaluate_client_health(&health, now),
+            Some(ClientRemovalReason::BackpressureTimeout)
+        );
+    }
+
+    #[test]
+    fn test_evaluate_client_health_retains_healthy_clients() {
+        let now = std::time::Instant::now();
+        let health = health_with(
+            1,
+            Some(now),
+            Some(now),
+            Some(now),
+            Some(DeliveryFailureKind::ChannelFull),
+        );
+
+        assert_eq!(evaluate_client_health(&health, now), None);
+    }
+
+    #[tokio::test]
+    async fn test_add_client_registers_client_and_receives_matching_updates() {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let filter: HashSet<[u8; 32]> = [pubkey(1)].into_iter().collect();
+        let (client_id, mut rx) =
+            dispatcher.add_client(filter.clone(), 8).await.unwrap();
+        // Acknowledged round-trip ensures the AddClient command has been
+        // processed before we publish.
+        dispatcher.update_filter(client_id, filter).await.unwrap();
+
+        dispatcher
+            .try_publish(update_for_pubkey(pubkey(1)))
+            .unwrap();
+
+        let update = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(extract_pubkey(&update), Some(&pubkey(1)));
+    }
+
+    #[tokio::test]
+    async fn test_non_matching_updates_are_not_received() {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let filter = [pubkey(1)].into_iter().collect();
+        let (_client_id, mut rx) =
+            dispatcher.add_client(filter, 8).await.unwrap();
+
+        dispatcher
+            .try_publish(update_for_pubkey(pubkey(2)))
+            .unwrap();
+
+        assert!(timeout(Duration::from_millis(50), rx.recv()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_update_filter_returns_exactly_newly_added_pubkeys() {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let initial = [pubkey(1)].into_iter().collect();
+        let (client_id, _rx) = dispatcher.add_client(initial, 8).await.unwrap();
+        let replacement =
+            [pubkey(1), pubkey(2), pubkey(3)].into_iter().collect();
+
+        let newly_added = dispatcher
+            .update_filter(client_id, replacement)
+            .await
+            .unwrap();
+
+        assert_eq!(newly_added, [pubkey(2), pubkey(3)].into_iter().collect());
+    }
+
+    #[tokio::test]
+    async fn test_patch_filter_returns_only_new_additions() {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let initial = [pubkey(1), pubkey(2)].into_iter().collect();
+        let (client_id, _rx) = dispatcher.add_client(initial, 8).await.unwrap();
+
+        let newly_added = dispatcher
+            .patch_filter(
+                client_id,
+                [pubkey(2), pubkey(3)].into_iter().collect(),
+                [pubkey(1)].into_iter().collect(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(newly_added, [pubkey(3)].into_iter().collect());
+    }
+
+    #[tokio::test]
+    async fn test_remove_client_prevents_further_delivery() {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let filter: HashSet<[u8; 32]> = [pubkey(1)].into_iter().collect();
+        let (client_id, mut rx) =
+            dispatcher.add_client(filter.clone(), 8).await.unwrap();
+        // Acknowledged round-trip ensures AddClient has been processed.
+        dispatcher.update_filter(client_id, filter).await.unwrap();
+
+        dispatcher.remove_client(client_id).await;
+        // Acknowledged round-trip ensures RemoveClient has been processed.
+        assert_eq!(
+            dispatcher
+                .send_to_client(client_id, update_for_pubkey(pubkey(1)))
+                .await
+                .unwrap(),
+            TargetedSendResult::ClientNotFound,
+        );
+        dispatcher
+            .try_publish(update_for_pubkey(pubkey(1)))
+            .unwrap();
+
+        assert!(matches!(
+            timeout(Duration::from_millis(50), rx.recv()).await,
+            Ok(None) | Err(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_send_to_client_returns_client_not_found_for_unknown_client() {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+
+        let result = dispatcher
+            .send_to_client(999, update_for_pubkey(pubkey(1)))
+            .await
+            .unwrap();
+
+        assert_eq!(result, TargetedSendResult::ClientNotFound);
+    }
+
+    #[tokio::test]
+    async fn test_full_client_channel_returns_failed_but_retained_until_threshold()
+     {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let filter = [pubkey(1)].into_iter().collect();
+        let (client_id, _rx) = dispatcher.add_client(filter, 1).await.unwrap();
+
+        assert_eq!(
+            dispatcher
+                .send_to_client(client_id, update_for_pubkey(pubkey(1)))
+                .await
+                .unwrap(),
+            TargetedSendResult::Delivered
+        );
+
+        for _ in 0..(MAX_CONSECUTIVE_DELIVERY_FAILURES - 1) {
+            assert_eq!(
+                dispatcher
+                    .send_to_client(client_id, update_for_pubkey(pubkey(1)))
+                    .await
+                    .unwrap(),
+                TargetedSendResult::FailedButRetained
+            );
+        }
+
+        assert_eq!(
+            dispatcher
+                .send_to_client(client_id, update_for_pubkey(pubkey(1)))
+                .await
+                .unwrap(),
+            TargetedSendResult::RemovedByPolicy
+        );
+    }
+
+    #[tokio::test]
+    async fn test_closed_client_channel_returns_removed_by_policy() {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let filter = [pubkey(1)].into_iter().collect();
+        let (client_id, rx) = dispatcher.add_client(filter, 1).await.unwrap();
+        drop(rx);
+        tokio::task::yield_now().await;
+
+        let result = dispatcher
+            .send_to_client(client_id, update_for_pubkey(pubkey(1)))
+            .await
+            .unwrap();
+
+        assert_eq!(result, TargetedSendResult::RemovedByPolicy);
+    }
+}

@@ -68,14 +68,14 @@ impl GrpcService {
         );
         let is_running = Arc::new(AtomicBool::new(true));
         let sink = GrpcSink::new(dispatcher.clone(), is_running.clone());
-        let snapshot_client =
+        let snapshot_store =
             KsqlAccountSnapshotClient::new(config.ksql.clone())?;
-        let init_subs_client =
+        let validator_subscriptions =
             InitSubsClient::new(config.validator.accounts_filter_url.clone())?;
         let service = GrpcSubscriptionService::new(
             dispatcher,
-            snapshot_client,
-            init_subs_client,
+            snapshot_store,
+            validator_subscriptions,
         )
         .into_server();
         let (shutdown_tx, shutdown_rx) = oneshot::channel();

@@ -118,7 +118,7 @@ mod tests {
     }
 
     #[test]
-    fn account_encoding_uses_raw_pubkey_as_key() {
+    fn test_account_encoding_uses_raw_pubkey_as_key() {
         let event = sample_event();
         let expected_key = event.pubkey.clone();
 
@@ -128,7 +128,7 @@ mod tests {
     }
 
     #[test]
-    fn account_encoding_wraps_payload_in_message_wrapper() {
+    fn test_account_encoding_wraps_payload_in_message_wrapper() {
         let event = sample_event();
         let expected = event.clone();
 

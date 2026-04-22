@@ -266,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn add_accounts_enqueues_all_new_keys() {
+    fn test_add_accounts_enqueues_all_new_keys() {
         let subs = AccountSubscriptions::new();
         let test_handle = InitialAccountBackfillHandle::new_test(4);
 
@@ -280,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn add_accounts_counts_duplicates_without_readding() {
+    fn test_add_accounts_counts_duplicates_without_readding() {
         let subs = AccountSubscriptions::new();
         let test_handle = InitialAccountBackfillHandle::new_test(4);
 
@@ -293,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn add_accounts_retries_previously_pending_backfills() {
+    fn test_add_accounts_retries_previously_pending_backfills() {
         let subs = AccountSubscriptions::new();
         let test_handle = InitialAccountBackfillHandle::new_test(4);
         subs.mark_needs_backfill(&[pk(8), pk(9)]);
@@ -306,7 +306,7 @@ mod tests {
     }
 
     #[test]
-    fn add_accounts_re_marks_needs_backfill_when_queue_is_full() {
+    fn test_add_accounts_re_marks_needs_backfill_when_queue_is_full() {
         let subs = AccountSubscriptions::new();
         let test_handle = InitialAccountBackfillHandle::new_test(1);
         test_handle.prefill_queue_for_test(vec![pk(50)]);

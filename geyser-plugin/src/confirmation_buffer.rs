@@ -376,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn buffers_latest_update_per_slot_pubkey() {
+    fn test_buffers_latest_update_per_slot_pubkey() {
         let mut confirmed = ConfirmedAccounts::new();
 
         confirmed.record_account(account_event(10, 1, 1));
@@ -398,7 +398,7 @@ mod tests {
     }
 
     #[test]
-    fn confirmed_slot_drains_updates_once() {
+    fn test_confirmed_slot_drains_updates_once() {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(11, 2, 1));
 
@@ -423,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn rooted_slot_drains_updates_once() {
+    fn test_rooted_slot_drains_updates_once() {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(12, 3, 1));
 
@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn confirmed_child_confirms_known_ancestors() {
+    fn test_confirmed_child_confirms_known_ancestors() {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(20, 4, 1));
         confirmed.record_account(account_event(21, 5, 1));
@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn confirmed_with_missing_parent_stops_inference() {
+    fn test_confirmed_with_missing_parent_stops_inference() {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(30, 7, 1));
 
@@ -488,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn confirmed_event_with_parent_none_uses_previous_parent_link() {
+    fn test_confirmed_event_with_parent_none_uses_previous_parent_link() {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(40, 8, 1));
         confirmed.record_account(account_event(41, 9, 1));
@@ -511,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn dead_slot_removes_own_updates() {
+    fn test_dead_slot_removes_own_updates() {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(50, 10, 1));
 
@@ -527,7 +527,7 @@ mod tests {
     }
 
     #[test]
-    fn dead_slot_removes_known_descendants() {
+    fn test_dead_slot_removes_known_descendants() {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(60, 11, 1));
         confirmed.record_account(account_event(61, 12, 1));
@@ -548,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn dead_slot_prevents_later_emission() {
+    fn test_dead_slot_prevents_later_emission() {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(70, 13, 1));
         confirmed.record_slot_status(70, None, InternalSlotStatus::Dead);
@@ -565,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_confirmed_status_is_idempotent() {
+    fn test_repeated_confirmed_status_is_idempotent() {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(80, 14, 1));
 
@@ -581,7 +581,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_fallback_evicts_old_unconfirmed_slots() {
+    fn test_stale_fallback_evicts_old_unconfirmed_slots() {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(1, 15, 1));
 
@@ -601,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_fallback_does_not_evict_confirmed_slots() {
+    fn test_stale_fallback_does_not_evict_confirmed_slots() {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(2, 16, 1));
         let _ = confirmed.record_slot_status(2, None, InternalSlotStatus::Confirmed);

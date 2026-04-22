@@ -18,9 +18,8 @@ use tracing::{debug, info, warn};
 
 use super::convert::to_subscribe_update;
 use super::dispatcher::{DispatcherHandle, TargetedSendResult};
-use super::init_subs::InitSubsClient;
 use crate::domain::{AccountEvent, PubkeyFilter};
-use crate::ksql::KsqlAccountSnapshotClient;
+use crate::traits::{SnapshotStore, ValidatorSubscriptions};
 
 type SubscribeStream = Pin<
     Box<
@@ -30,23 +29,30 @@ type SubscribeStream = Pin<
     >,
 >;
 
-#[derive(Clone, Debug)]
-pub(crate) struct GrpcSubscriptionService {
+#[derive(Clone)]
+pub(crate) struct GrpcSubscriptionService<
+    P: SnapshotStore + Clone + Send + Sync + 'static,
+    V: ValidatorSubscriptions + Clone + Send + Sync + 'static,
+> {
     dispatcher: DispatcherHandle,
-    snapshot_client: KsqlAccountSnapshotClient,
-    init_subs_client: InitSubsClient,
+    snapshot_store: P,
+    validator_subscriptions: V,
 }
 
-impl GrpcSubscriptionService {
+impl<
+    P: SnapshotStore + Clone + Send + Sync + 'static,
+    V: ValidatorSubscriptions + Clone + Send + Sync + 'static,
+> GrpcSubscriptionService<P, V>
+{
     pub(crate) fn new(
         dispatcher: DispatcherHandle,
-        snapshot_client: KsqlAccountSnapshotClient,
-        init_subs_client: InitSubsClient,
+        snapshot_store: P,
+        validator_subscriptions: V,
     ) -> Self {
         Self {
             dispatcher,
-            snapshot_client,
-            init_subs_client,
+            snapshot_store,
+            validator_subscriptions,
         }
     }
 
@@ -55,10 +61,13 @@ impl GrpcSubscriptionService {
     }
 }
 
-async fn bootstrap_new_pubkeys(
+async fn bootstrap_new_pubkeys_impl<
+    P: SnapshotStore + Send + Sync,
+    V: ValidatorSubscriptions + Send + Sync,
+>(
     dispatcher: &DispatcherHandle,
-    snapshot_client: &KsqlAccountSnapshotClient,
-    init_subs_client: &InitSubsClient,
+    snapshot_store: &P,
+    validator_subscriptions: &V,
     client_id: u64,
     newly_added: HashSet<[u8; 32]>,
 ) {
@@ -92,8 +101,7 @@ async fn bootstrap_new_pubkeys(
         // will publish one of two Kafka updates:
         // - the current account update if the account exists
         // - a MissingAccount update if the account does not exist
-        let snapshot = match snapshot_client.fetch_one_by_pubkey(&pubkey).await
-        {
+        let snapshot = match snapshot_store.fetch_one_by_pubkey(&pubkey).await {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 warn!(
@@ -178,7 +186,7 @@ async fn bootstrap_new_pubkeys(
         "whitelisting ksql-missing pubkeys with validator"
     );
 
-    if let Err(error) = init_subs_client
+    if let Err(error) = validator_subscriptions
         .whitelist_pubkeys(&pubkeys_to_whitelist)
         .await
     {
@@ -281,7 +289,11 @@ fn parse_filter_op(req: &SubscribeRequest) -> Result<FilterOp, Status> {
 }
 
 #[tonic::async_trait]
-impl Geyser for GrpcSubscriptionService {
+impl<
+    P: SnapshotStore + Clone + Send + Sync + 'static,
+    V: ValidatorSubscriptions + Clone + Send + Sync + 'static,
+> Geyser for GrpcSubscriptionService<P, V>
+{
     type SubscribeStream = SubscribeStream;
 
     async fn subscribe(
@@ -311,8 +323,8 @@ impl Geyser for GrpcSubscriptionService {
 
         // 3. Spawn task to read subsequent messages
         let dispatcher = self.dispatcher.clone();
-        let snapshot_client = self.snapshot_client.clone();
-        let init_subs_client = self.init_subs_client.clone();
+        let snapshot_store = self.snapshot_store.clone();
+        let validator_subscriptions = self.validator_subscriptions.clone();
         tokio::spawn(async move {
             while let Some(result) = request_stream.next().await {
                 match result {
@@ -348,10 +360,12 @@ impl Geyser for GrpcSubscriptionService {
                             }
                         };
 
-                        bootstrap_new_pubkeys(
+                        // Note: self is not available in this spawned task,
+                        // so we call the impl directly with the cloned fields
+                        bootstrap_new_pubkeys_impl(
                             &dispatcher,
-                            &snapshot_client,
-                            &init_subs_client,
+                            &snapshot_store,
+                            &validator_subscriptions,
                             client_id,
                             newly_added,
                         )
@@ -445,5 +459,470 @@ impl Geyser for GrpcSubscriptionService {
         _request: Request<GetVersionRequest>,
     ) -> Result<Response<GetVersionResponse>, Status> {
         Err(Status::unimplemented("GetVersion is not supported"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use helius_laserstream::grpc::{
+        SubscribeRequest, SubscribeRequestFilterAccounts,
+        subscribe_update::UpdateOneof,
+    };
+    use tokio::time::timeout;
+
+    use super::{
+        FilterOp, bootstrap_new_pubkeys_impl, parse_accounts_filter,
+        parse_filter_op, parse_pubkey_list,
+    };
+    use crate::domain::{AccountState, PubkeyFilter, bytes_to_base58};
+    use crate::errors::{GeykagError, GeykagResult};
+    use crate::grpc_service::dispatcher::DispatcherHandle;
+    use crate::traits::{SnapshotStore, ValidatorSubscriptions};
+
+    fn pubkey_bytes(byte: u8) -> [u8; 32] {
+        [byte; 32]
+    }
+
+    fn pubkey_b58(byte: u8) -> String {
+        bytes_to_base58(&pubkey_bytes(byte))
+    }
+
+    fn empty_request() -> SubscribeRequest {
+        SubscribeRequest {
+            accounts: HashMap::new(),
+            slots: HashMap::new(),
+            transactions: HashMap::new(),
+            transactions_status: HashMap::new(),
+            blocks: HashMap::new(),
+            blocks_meta: HashMap::new(),
+            entry: HashMap::new(),
+            commitment: None,
+            accounts_data_slice: Vec::new(),
+            ping: None,
+            from_slot: None,
+        }
+    }
+
+    fn account_filter_request(key: &str, pubkeys: &[u8]) -> SubscribeRequest {
+        let mut request = empty_request();
+        request.accounts.insert(
+            key.to_owned(),
+            SubscribeRequestFilterAccounts {
+                account: pubkeys.iter().map(|byte| pubkey_b58(*byte)).collect(),
+                owner: Vec::new(),
+                filters: Vec::new(),
+                nonempty_txn_signature: None,
+            },
+        );
+        request
+    }
+
+    fn replace_request(pubkeys: &[u8]) -> SubscribeRequest {
+        account_filter_request("client", pubkeys)
+    }
+
+    fn add_request(pubkeys: &[u8]) -> SubscribeRequest {
+        account_filter_request("add", pubkeys)
+    }
+
+    fn add_remove_request(add: &[u8], remove: &[u8]) -> SubscribeRequest {
+        let mut request = add_request(add);
+        request.accounts.insert(
+            "remove".to_owned(),
+            SubscribeRequestFilterAccounts {
+                account: remove.iter().map(|byte| pubkey_b58(*byte)).collect(),
+                owner: Vec::new(),
+                filters: Vec::new(),
+                nonempty_txn_signature: None,
+            },
+        );
+        request
+    }
+
+    fn snapshot_state(byte: u8) -> AccountState {
+        AccountState {
+            pubkey_b58: pubkey_b58(byte),
+            pubkey_bytes: pubkey_bytes(byte).to_vec(),
+            owner_b58: bytes_to_base58(&pubkey_bytes(byte.wrapping_add(32))),
+            slot: 10,
+            lamports: 55,
+            executable: false,
+            rent_epoch: 2,
+            write_version: 3,
+            txn_signature_b58: Some(bytes_to_base58(&[7; 64])),
+            data_len: 9,
+        }
+    }
+
+    #[derive(Clone)]
+    struct MockSnapshotStore {
+        state: Arc<Mutex<MockSnapshotStoreState>>,
+    }
+
+    struct MockSnapshotStoreState {
+        fetch_filtered_result: Result<Vec<AccountState>, &'static str>,
+        fetch_one_results:
+            HashMap<String, Result<Option<AccountState>, &'static str>>,
+        requested_pubkeys: Vec<String>,
+    }
+
+    impl MockSnapshotStore {
+        fn new(
+            fetch_one_results: HashMap<
+                String,
+                Result<Option<AccountState>, &'static str>,
+            >,
+        ) -> Self {
+            Self {
+                state: Arc::new(Mutex::new(MockSnapshotStoreState {
+                    fetch_filtered_result: Ok(Vec::new()),
+                    fetch_one_results,
+                    requested_pubkeys: Vec::new(),
+                })),
+            }
+        }
+
+        fn requested_pubkeys(&self) -> Vec<String> {
+            self.state.lock().unwrap().requested_pubkeys.clone()
+        }
+    }
+
+    impl SnapshotStore for MockSnapshotStore {
+        fn fetch_filtered(
+            &self,
+            _filter: Option<&PubkeyFilter>,
+        ) -> impl std::future::Future<Output = GeykagResult<Vec<AccountState>>> + Send
+        {
+            let result =
+                self.state.lock().unwrap().fetch_filtered_result.clone();
+            async move {
+                result.map_err(|message| {
+                    GeykagError::GrpcEventConversion(message.to_owned())
+                })
+            }
+        }
+
+        fn fetch_one_by_pubkey(
+            &self,
+            pubkey: &PubkeyFilter,
+        ) -> impl std::future::Future<
+            Output = GeykagResult<Option<AccountState>>,
+        > + Send {
+            let pubkey = pubkey.as_str().to_owned();
+            let result = {
+                let mut state = self.state.lock().unwrap();
+                state.requested_pubkeys.push(pubkey.clone());
+                state
+                    .fetch_one_results
+                    .get(&pubkey)
+                    .cloned()
+                    .unwrap_or(Ok(None))
+            };
+
+            async move {
+                result.map_err(|message| {
+                    GeykagError::GrpcEventConversion(message.to_owned())
+                })
+            }
+        }
+    }
+
+    #[derive(Clone)]
+    struct MockValidatorSubscriptions {
+        state: Arc<Mutex<MockValidatorSubscriptionsState>>,
+    }
+
+    struct MockValidatorSubscriptionsState {
+        calls: Vec<Vec<String>>,
+        result: Result<(), &'static str>,
+    }
+
+    impl MockValidatorSubscriptions {
+        fn succeed() -> Self {
+            Self {
+                state: Arc::new(Mutex::new(MockValidatorSubscriptionsState {
+                    calls: Vec::new(),
+                    result: Ok(()),
+                })),
+            }
+        }
+
+        fn fail(message: &'static str) -> Self {
+            Self {
+                state: Arc::new(Mutex::new(MockValidatorSubscriptionsState {
+                    calls: Vec::new(),
+                    result: Err(message),
+                })),
+            }
+        }
+
+        fn calls(&self) -> Vec<Vec<String>> {
+            self.state.lock().unwrap().calls.clone()
+        }
+    }
+
+    impl ValidatorSubscriptions for MockValidatorSubscriptions {
+        fn whitelist_pubkeys(
+            &self,
+            pubkeys: &[String],
+        ) -> impl std::future::Future<Output = GeykagResult<()>> + Send
+        {
+            let result = {
+                let mut state = self.state.lock().unwrap();
+                state.calls.push(pubkeys.to_vec());
+                state.result
+            };
+
+            async move {
+                result.map_err(|message| {
+                    GeykagError::GrpcEventConversion(message.to_owned())
+                })
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_accounts_filter_parses_accounts() {
+        let request = replace_request(&[1, 2]);
+
+        let parsed = parse_accounts_filter(&request).unwrap();
+
+        assert_eq!(
+            parsed,
+            [pubkey_bytes(1), pubkey_bytes(2)].into_iter().collect()
+        );
+    }
+
+    #[test]
+    fn test_parse_pubkey_list_parses_accounts() {
+        let parsed =
+            parse_pubkey_list(&[pubkey_b58(1), pubkey_b58(2)]).unwrap();
+
+        assert_eq!(
+            parsed,
+            [pubkey_bytes(1), pubkey_bytes(2)].into_iter().collect()
+        );
+    }
+
+    #[test]
+    fn test_parse_filter_op_parses_replace_request() {
+        match parse_filter_op(&replace_request(&[1, 2])).unwrap() {
+            FilterOp::Replace(filter) => assert_eq!(
+                filter,
+                [pubkey_bytes(1), pubkey_bytes(2)].into_iter().collect()
+            ),
+            FilterOp::Patch { .. } => panic!("expected replace filter op"),
+        }
+    }
+
+    #[test]
+    fn test_parse_filter_op_parses_patch_request() {
+        match parse_filter_op(&add_remove_request(&[1, 2], &[3])).unwrap() {
+            FilterOp::Patch { add, remove } => {
+                assert_eq!(
+                    add,
+                    [pubkey_bytes(1), pubkey_bytes(2)].into_iter().collect()
+                );
+                assert_eq!(remove, [pubkey_bytes(3)].into_iter().collect());
+            }
+            FilterOp::Replace(_) => panic!("expected patch filter op"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_existing_snapshot_sends_targeted_update_and_does_not_whitelist()
+     {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let (client_id, mut rx) = dispatcher
+            .add_client([pubkey_bytes(1)].into_iter().collect(), 8)
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+
+        let snapshot_store = MockSnapshotStore::new(HashMap::from([(
+            pubkey_b58(1),
+            Ok(Some(snapshot_state(1))),
+        )]));
+        let validator = MockValidatorSubscriptions::succeed();
+
+        bootstrap_new_pubkeys_impl(
+            &dispatcher,
+            &snapshot_store,
+            &validator,
+            client_id,
+            [pubkey_bytes(1)].into_iter().collect(),
+        )
+        .await;
+
+        let delivered = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        match &delivered.update_oneof {
+            Some(UpdateOneof::Account(account)) => {
+                assert_eq!(
+                    account.account.as_ref().unwrap().pubkey,
+                    pubkey_bytes(1).to_vec()
+                );
+            }
+            other => panic!("expected account update, got {other:?}"),
+        }
+        assert!(validator.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_missing_snapshot_whitelists_pubkey_and_sends_no_targeted_update()
+     {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let (client_id, mut rx) = dispatcher
+            .add_client([pubkey_bytes(1)].into_iter().collect(), 8)
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+
+        let snapshot_store =
+            MockSnapshotStore::new(HashMap::from([(pubkey_b58(1), Ok(None))]));
+        let validator = MockValidatorSubscriptions::succeed();
+
+        bootstrap_new_pubkeys_impl(
+            &dispatcher,
+            &snapshot_store,
+            &validator,
+            client_id,
+            [pubkey_bytes(1)].into_iter().collect(),
+        )
+        .await;
+
+        assert!(timeout(Duration::from_millis(50), rx.recv()).await.is_err());
+        assert_eq!(validator.calls(), vec![vec![pubkey_b58(1)]]);
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_fetch_error_skips_pubkey_and_continues_with_rest() {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let (client_id, _rx) = dispatcher
+            .add_client(
+                [pubkey_bytes(1), pubkey_bytes(2)].into_iter().collect(),
+                8,
+            )
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+
+        let snapshot_store = MockSnapshotStore::new(HashMap::from([
+            (pubkey_b58(1), Err("fetch failed")),
+            (pubkey_b58(2), Ok(None)),
+        ]));
+        let validator = MockValidatorSubscriptions::succeed();
+
+        bootstrap_new_pubkeys_impl(
+            &dispatcher,
+            &snapshot_store,
+            &validator,
+            client_id,
+            [pubkey_bytes(1), pubkey_bytes(2)].into_iter().collect(),
+        )
+        .await;
+
+        let requested: HashSet<_> =
+            snapshot_store.requested_pubkeys().into_iter().collect();
+        assert_eq!(
+            requested,
+            [pubkey_b58(1), pubkey_b58(2)].into_iter().collect()
+        );
+        assert_eq!(validator.calls(), vec![vec![pubkey_b58(2)]]);
+    }
+
+    #[tokio::test]
+    async fn test_invalid_snapshot_conversion_skips_pubkey() {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let (client_id, mut rx) = dispatcher
+            .add_client([pubkey_bytes(1)].into_iter().collect(), 8)
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+
+        let mut invalid_snapshot = snapshot_state(1);
+        invalid_snapshot.owner_b58 = "0invalid-owner".to_owned();
+        let snapshot_store = MockSnapshotStore::new(HashMap::from([(
+            pubkey_b58(1),
+            Ok(Some(invalid_snapshot)),
+        )]));
+        let validator = MockValidatorSubscriptions::succeed();
+
+        bootstrap_new_pubkeys_impl(
+            &dispatcher,
+            &snapshot_store,
+            &validator,
+            client_id,
+            [pubkey_bytes(1)].into_iter().collect(),
+        )
+        .await;
+
+        assert!(timeout(Duration::from_millis(50), rx.recv()).await.is_err());
+        assert!(validator.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_client_not_found_stops_bootstrap_loop() {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let snapshot_store = MockSnapshotStore::new(HashMap::from([
+            (pubkey_b58(1), Ok(Some(snapshot_state(1)))),
+            (pubkey_b58(2), Ok(Some(snapshot_state(2)))),
+        ]));
+        let validator = MockValidatorSubscriptions::succeed();
+
+        bootstrap_new_pubkeys_impl(
+            &dispatcher,
+            &snapshot_store,
+            &validator,
+            999,
+            [pubkey_bytes(1), pubkey_bytes(2)].into_iter().collect(),
+        )
+        .await;
+
+        assert_eq!(snapshot_store.requested_pubkeys().len(), 1);
+        assert!(validator.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_validator_whitelist_errors_are_swallowed_after_collecting_missing_pubkeys()
+     {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let (client_id, _rx) = dispatcher
+            .add_client(
+                [pubkey_bytes(1), pubkey_bytes(2)].into_iter().collect(),
+                8,
+            )
+            .await
+            .unwrap();
+        tokio::task::yield_now().await;
+
+        let snapshot_store = MockSnapshotStore::new(HashMap::from([
+            (pubkey_b58(1), Ok(None)),
+            (pubkey_b58(2), Ok(None)),
+        ]));
+        let validator = MockValidatorSubscriptions::fail("whitelist failed");
+
+        bootstrap_new_pubkeys_impl(
+            &dispatcher,
+            &snapshot_store,
+            &validator,
+            client_id,
+            [pubkey_bytes(1), pubkey_bytes(2)].into_iter().collect(),
+        )
+        .await;
+
+        let calls = validator.calls();
+        assert_eq!(calls.len(), 1);
+        let whitelisted: HashSet<_> = calls[0].iter().cloned().collect();
+        assert_eq!(
+            whitelisted,
+            [pubkey_b58(1), pubkey_b58(2)].into_iter().collect()
+        );
     }
 }

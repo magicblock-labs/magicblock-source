@@ -212,7 +212,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_valid_minimal_config() {
+    fn test_parses_valid_minimal_config() {
         let config = parse_config(
             r#"
 libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
@@ -233,7 +233,7 @@ admin = "127.0.0.1:8080"
     }
 
     #[test]
-    fn rejects_missing_admin() {
+    fn test_rejects_missing_admin() {
         let error = parse_config(
             r#"
 libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
@@ -252,7 +252,7 @@ local_rpc_url = "http://127.0.0.1:8899"
     }
 
     #[test]
-    fn rejects_missing_kafka_topic() {
+    fn test_rejects_missing_kafka_topic() {
         let error = parse_config(
             r#"
 libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
@@ -271,7 +271,7 @@ admin = "127.0.0.1:8080"
     }
 
     #[test]
-    fn rejects_missing_bootstrap_servers() {
+    fn test_rejects_missing_bootstrap_servers() {
         let error = parse_config(
             r#"
 libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
@@ -291,7 +291,7 @@ admin = "127.0.0.1:8080"
     }
 
     #[test]
-    fn rejects_legacy_filter_fields() {
+    fn test_rejects_legacy_filter_fields() {
         let error = parse_config(
             r#"
 libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
@@ -312,7 +312,7 @@ admin = "127.0.0.1:8080"
     }
 
     #[test]
-    fn parses_config_with_metrics_enabled() {
+    fn test_parses_config_with_metrics_enabled() {
         let config = parse_config(
             r#"
 libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
@@ -333,7 +333,7 @@ metrics = true
     }
 
     #[test]
-    fn metrics_defaults_to_false() {
+    fn test_metrics_defaults_to_false() {
         let config = parse_config(
             r#"
 libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
@@ -353,7 +353,7 @@ admin = "127.0.0.1:8080"
     }
 
     #[test]
-    fn parses_config_without_ksql_startup_restore_url() {
+    fn test_parses_config_without_ksql_startup_restore_url() {
         let config = parse_config(
             r#"
 libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
@@ -373,7 +373,7 @@ admin = "127.0.0.1:8080"
     }
 
     #[test]
-    fn parses_config_with_valid_ksql_startup_restore_url() {
+    fn test_parses_config_with_valid_ksql_startup_restore_url() {
         let config = parse_config(
             r#"
 libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
@@ -396,7 +396,7 @@ admin = "127.0.0.1:8080"
     }
 
     #[test]
-    fn rejects_empty_ksql_startup_restore_url() {
+    fn test_rejects_empty_ksql_startup_restore_url() {
         let error = parse_config(
             r#"
 libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
@@ -419,7 +419,7 @@ admin = "127.0.0.1:8080"
     }
 
     #[test]
-    fn rejects_ksql_startup_restore_url_without_scheme() {
+    fn test_rejects_ksql_startup_restore_url_without_scheme() {
         let error = parse_config(
             r#"
 libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
@@ -442,7 +442,7 @@ admin = "127.0.0.1:8080"
     }
 
     #[test]
-    fn rejects_ksql_startup_restore_url_without_host() {
+    fn test_rejects_ksql_startup_restore_url_without_host() {
         let error = parse_config(
             r#"
 libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
@@ -465,7 +465,7 @@ admin = "127.0.0.1:8080"
     }
 
     #[test]
-    fn passes_through_kafka_client_overrides() {
+    fn test_passes_through_kafka_client_overrides() {
         let config = parse_config(
             r#"
 libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"

@@ -1,4 +1,5 @@
 use crate::errors::{GeykagError, GeykagResult};
+use crate::traits::ValidatorSubscriptions;
 
 #[derive(Clone, Debug)]
 pub(crate) struct InitSubsClient {
@@ -43,5 +44,11 @@ impl InitSubsClient {
             .error_for_status()
             .map(|_| ())
             .map_err(|source| GeykagError::InitSubsRequestStatus { source })
+    }
+}
+
+impl ValidatorSubscriptions for InitSubsClient {
+    async fn whitelist_pubkeys(&self, pubkeys: &[String]) -> GeykagResult<()> {
+        InitSubsClient::whitelist_pubkeys(self, pubkeys).await
     }
 }

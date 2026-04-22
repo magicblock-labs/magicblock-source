@@ -367,7 +367,7 @@ mod tests {
     }
 
     #[test]
-    fn restore_tracking_from_ksql_is_noop_when_disabled() {
+    fn test_restore_tracking_from_ksql_is_noop_when_disabled() {
         let config = Config::default();
         let subs = AccountSubscriptions::new();
         let initial_account_backfill =
@@ -381,7 +381,7 @@ mod tests {
     }
 
     #[test]
-    fn restore_pubkeys_in_chunks_deduplicates_before_subscribing() {
+    fn test_restore_pubkeys_in_chunks_deduplicates_before_subscribing() {
         let subs = AccountSubscriptions::new();
         let test_handle = InitialAccountBackfillHandle::new_test(8);
 
@@ -399,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn restore_pubkeys_in_chunks_handles_chunk_boundaries() {
+    fn test_restore_pubkeys_in_chunks_handles_chunk_boundaries() {
         let subs = AccountSubscriptions::new();
         let test_handle = InitialAccountBackfillHandle::new_test(8);
         let pubkeys = (0..=INIT_TRACKING_RESTORE_CHUNK_SIZE)
@@ -422,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn restore_pubkeys_in_chunks_aborts_when_queue_is_full() {
+    fn test_restore_pubkeys_in_chunks_aborts_when_queue_is_full() {
         let subs = AccountSubscriptions::new();
         let test_handle = InitialAccountBackfillHandle::new_test(1);
         test_handle.prefill_queue_for_test(vec![pk(9)]);
