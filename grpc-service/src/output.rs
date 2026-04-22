@@ -158,17 +158,17 @@ mod tests {
     }
 
     #[test]
-    fn format_identifier_returns_empty_marker_for_empty_string() {
+    fn test_format_identifier_returns_empty_marker_for_empty_string() {
         assert_eq!(format_identifier(""), "(empty)");
     }
 
     #[test]
-    fn format_identifier_returns_non_empty_value_unchanged() {
+    fn test_format_identifier_returns_non_empty_value_unchanged() {
         assert_eq!(format_identifier("owner123"), "owner123");
     }
 
     #[test]
-    fn format_snapshot_renders_expected_fields() {
+    fn test_format_snapshot_renders_expected_fields() {
         let rendered = format_snapshot(&snapshot());
 
         assert!(rendered.contains("slot:          42"));
@@ -180,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn format_update_renders_expected_fields() {
+    fn test_format_update_renders_expected_fields() {
         let rendered = format_update(&update());
 
         assert!(rendered.contains("slot:          52"));

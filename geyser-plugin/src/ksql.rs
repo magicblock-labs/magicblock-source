@@ -136,7 +136,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_header_and_valid_rows() {
+    fn test_parses_header_and_valid_rows() {
         let body = concat!(
             "{\"queryId\":\"query_1\"}\n",
             "[\"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\"]\n"
@@ -148,7 +148,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_multiple_valid_rows() {
+    fn test_parses_multiple_valid_rows() {
         let body = concat!(
             "[\"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\"]\n",
             "[\"AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\"]\n"
@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_ksql_error_rows() {
+    fn test_rejects_ksql_error_rows() {
         let error = parse_pubkeys_stream("{\"@type\":\"error\",\"message\":\"boom\"}\n".as_bytes())
             .unwrap_err()
             .to_string();
@@ -169,7 +169,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_array_data_rows() {
+    fn test_rejects_non_array_data_rows() {
         let error = parse_pubkeys_stream("\"nope\"\n".as_bytes())
             .unwrap_err()
             .to_string();
@@ -178,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_wrong_column_count() {
+    fn test_rejects_wrong_column_count() {
         let error = parse_pubkeys_stream("[\"a\",\"b\"]\n".as_bytes())
             .unwrap_err()
             .to_string();
@@ -187,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_base64() {
+    fn test_rejects_invalid_base64() {
         let error = parse_pubkeys_stream("[\"not-base64\"]\n".as_bytes())
             .unwrap_err()
             .to_string();
@@ -196,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_wrong_pubkey_length() {
+    fn test_rejects_wrong_pubkey_length() {
         let error = parse_pubkeys_stream("[\"AQ==\"]\n".as_bytes())
             .unwrap_err()
             .to_string();

@@ -198,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn pubkey_filter_parse_accepts_valid_base58_key() {
+    fn test_pubkey_filter_parse_accepts_valid_base58_key() {
         let filter = PubkeyFilter::parse(&valid_pubkey_b58()).unwrap();
 
         assert_eq!(filter.as_str(), valid_pubkey_b58());
@@ -206,14 +206,14 @@ mod tests {
     }
 
     #[test]
-    fn pubkey_filter_parse_rejects_invalid_base58() {
+    fn test_pubkey_filter_parse_rejects_invalid_base58() {
         let error = PubkeyFilter::parse("not_base58_0OIl").unwrap_err();
 
         assert!(matches!(error, GeykagError::InvalidPubkey { .. }));
     }
 
     #[test]
-    fn pubkey_filter_parse_rejects_non_32_byte_keys() {
+    fn test_pubkey_filter_parse_rejects_non_32_byte_keys() {
         let short_key = bytes_to_base58(&[7; 31]);
         let error = PubkeyFilter::parse(&short_key).unwrap_err();
 
@@ -224,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn pubkey_filter_matches_only_identical_bytes() {
+    fn test_pubkey_filter_matches_only_identical_bytes() {
         let filter = PubkeyFilter::parse(&valid_pubkey_b58()).unwrap();
 
         assert!(filter.matches(&valid_pubkey_bytes()));
@@ -232,12 +232,13 @@ mod tests {
     }
 
     #[test]
-    fn account_state_matches_filter_returns_true_for_none() {
+    fn test_account_state_matches_filter_returns_true_for_none() {
         assert!(sample_account_state().matches_filter(None));
     }
 
     #[test]
-    fn account_update_matches_filter_returns_false_for_non_matching_filter() {
+    fn test_account_update_matches_filter_returns_false_for_non_matching_filter()
+     {
         let update = sample_account_update();
         let filter = PubkeyFilter::parse(&valid_owner_b58()).unwrap();
 
@@ -245,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn account_state_from_account_update_ref_copies_all_fields() {
+    fn test_account_state_from_account_update_ref_copies_all_fields() {
         let update = sample_account_update();
         let state = AccountState::from(&update);
 
@@ -262,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn account_state_from_account_update_moves_all_fields() {
+    fn test_account_state_from_account_update_moves_all_fields() {
         let update = sample_account_update();
         let expected_pubkey_b58 = update.pubkey_b58.clone();
         let expected_pubkey_bytes = update.pubkey_bytes.clone();
@@ -290,12 +291,12 @@ mod tests {
     }
 
     #[test]
-    fn bytes_to_base58_empty_bytes_returns_empty_string() {
+    fn test_bytes_to_base58_empty_bytes_returns_empty_string() {
         assert_eq!(bytes_to_base58(&[]), "");
     }
 
     #[test]
-    fn bytes_to_base58_round_trips_valid_bytes() {
+    fn test_bytes_to_base58_round_trips_valid_bytes() {
         let bytes = valid_pubkey_bytes();
         let encoded = bytes_to_base58(&bytes);
         let decoded = bs58::decode(encoded).into_vec().unwrap();

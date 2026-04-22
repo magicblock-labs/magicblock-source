@@ -112,7 +112,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_add_keeps_counts_zero() {
+    fn test_empty_add_keeps_counts_zero() {
         let subs = AccountSubscriptions::new();
 
         let result = subs.add(Vec::<[u8; 32]>::new());
@@ -123,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn all_new_pubkeys_are_reported_as_newly_added() {
+    fn test_all_new_pubkeys_are_reported_as_newly_added() {
         let subs = AccountSubscriptions::new();
 
         let result = subs.add(vec![pk(1), pk(2), pk(3)]);
@@ -134,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_pubkeys_within_request_are_counted_once() {
+    fn test_duplicate_pubkeys_within_request_are_counted_once() {
         let subs = AccountSubscriptions::new();
 
         let result = subs.add(vec![pk(1), pk(1), pk(2), pk(2), pk(2)]);
@@ -145,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn readding_existing_pubkeys_counts_as_duplicates() {
+    fn test_readding_existing_pubkeys_counts_as_duplicates() {
         let subs = AccountSubscriptions::new();
         let _ = subs.add(vec![pk(1), pk(2)]);
 
@@ -157,7 +157,7 @@ mod tests {
     }
 
     #[test]
-    fn mark_needs_backfill_is_idempotent_per_key() {
+    fn test_mark_needs_backfill_is_idempotent_per_key() {
         let subs = AccountSubscriptions::new();
 
         subs.mark_needs_backfill(&[pk(1)]);
@@ -169,7 +169,7 @@ mod tests {
     }
 
     #[test]
-    fn mark_then_drain_returns_all_and_empties() {
+    fn test_mark_then_drain_returns_all_and_empties() {
         let subs = AccountSubscriptions::new();
 
         subs.mark_needs_backfill(&[pk(1), pk(2), pk(3)]);
@@ -181,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn drain_on_empty_returns_empty_and_zero_count() {
+    fn test_drain_on_empty_returns_empty_and_zero_count() {
         let subs = AccountSubscriptions::new();
 
         let drained = subs.drain_needs_backfill();
@@ -191,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn clear_needs_backfill_removes_only_specified_keys() {
+    fn test_clear_needs_backfill_removes_only_specified_keys() {
         let subs = AccountSubscriptions::new();
         subs.mark_needs_backfill(&[pk(1), pk(2), pk(3), pk(4)]);
 

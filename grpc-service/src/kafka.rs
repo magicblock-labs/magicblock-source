@@ -248,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn strip_confluent_protobuf_framing_returns_stripped_payload() {
+    fn test_strip_confluent_protobuf_framing_returns_stripped_payload() {
         let payload = bare_payload_bytes();
         let framed = confluent_framed_payload_bytes(&payload);
 
@@ -259,12 +259,12 @@ mod tests {
     }
 
     #[test]
-    fn strip_confluent_protobuf_framing_rejects_short_payloads() {
+    fn test_strip_confluent_protobuf_framing_rejects_short_payloads() {
         assert_eq!(strip_confluent_protobuf_framing(&[0, 0, 0, 0, 0]), None);
     }
 
     #[test]
-    fn strip_confluent_protobuf_framing_rejects_wrong_magic_byte() {
+    fn test_strip_confluent_protobuf_framing_rejects_wrong_magic_byte() {
         let payload = bare_payload_bytes();
         let mut framed = confluent_framed_payload_bytes(&payload);
         framed[0] = 1;
@@ -273,7 +273,8 @@ mod tests {
     }
 
     #[test]
-    fn strip_confluent_protobuf_framing_rejects_wrong_message_index_byte() {
+    fn test_strip_confluent_protobuf_framing_rejects_wrong_message_index_byte()
+    {
         let payload = bare_payload_bytes();
         let mut framed = confluent_framed_payload_bytes(&payload);
         framed[5] = 1;
@@ -282,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn decode_raw_account_update_decodes_bare_update_account_event() {
+    fn test_decode_raw_account_update_decodes_bare_update_account_event() {
         let account = decode_raw_account_update(&bare_payload_bytes()).unwrap();
 
         assert_eq!(account.slot, 42);
@@ -291,7 +292,8 @@ mod tests {
     }
 
     #[test]
-    fn decode_raw_account_update_decodes_wrapped_message_wrapper_account() {
+    fn test_decode_raw_account_update_decodes_wrapped_message_wrapper_account()
+    {
         let account =
             decode_raw_account_update(&wrapped_payload_bytes()).unwrap();
 
@@ -301,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn decode_raw_account_update_rejects_wrapper_without_payload() {
+    fn test_decode_raw_account_update_rejects_wrapper_without_payload() {
         let payload = MessageWrapper {
             event_message: None,
         }
@@ -312,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn decode_raw_account_update_rejects_invalid_protobuf_bytes() {
+    fn test_decode_raw_account_update_rejects_invalid_protobuf_bytes() {
         let error = decode_raw_account_update(&[0xff, 0x01, 0x02]).unwrap_err();
 
         assert!(matches!(
@@ -322,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn decode_account_update_prefers_direct_raw_decode() {
+    fn test_decode_account_update_prefers_direct_raw_decode() {
         let account = decode_account_update(&bare_payload_bytes()).unwrap();
 
         assert_eq!(account.slot, 42);
@@ -330,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn decode_account_update_falls_back_to_stripped_confluent_frame() {
+    fn test_decode_account_update_falls_back_to_stripped_confluent_frame() {
         let framed = confluent_framed_payload_bytes(&wrapped_payload_bytes());
         let account = decode_account_update(&framed).unwrap();
 
@@ -341,14 +343,14 @@ mod tests {
     }
 
     #[test]
-    fn decode_account_update_rejects_unknown_payload_encoding() {
+    fn test_decode_account_update_rejects_unknown_payload_encoding() {
         let error = decode_account_update(&[1, 2, 3, 4, 5, 6, 7]).unwrap_err();
 
         assert!(matches!(error, GeykagError::UnsupportedPayloadEncoding));
     }
 
     #[test]
-    fn account_update_from_proto_maps_all_fields() {
+    fn test_account_update_from_proto_maps_all_fields() {
         let account = AccountUpdate::from_proto(sample_account_event());
 
         assert_eq!(

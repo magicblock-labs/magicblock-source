@@ -686,7 +686,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_accounts_filter_parses_accounts() {
+    fn test_parse_accounts_filter_parses_accounts() {
         let request = replace_request(&[1, 2]);
 
         let parsed = parse_accounts_filter(&request).unwrap();
@@ -698,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_pubkey_list_parses_accounts() {
+    fn test_parse_pubkey_list_parses_accounts() {
         let parsed =
             parse_pubkey_list(&[pubkey_b58(1), pubkey_b58(2)]).unwrap();
 
@@ -709,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_filter_op_parses_replace_request() {
+    fn test_parse_filter_op_parses_replace_request() {
         match parse_filter_op(&replace_request(&[1, 2])).unwrap() {
             FilterOp::Replace(filter) => assert_eq!(
                 filter,
@@ -720,7 +720,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_filter_op_parses_patch_request() {
+    fn test_parse_filter_op_parses_patch_request() {
         match parse_filter_op(&add_remove_request(&[1, 2], &[3])).unwrap() {
             FilterOp::Patch { add, remove } => {
                 assert_eq!(
@@ -734,7 +734,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn existing_snapshot_sends_targeted_update_and_does_not_whitelist() {
+    async fn test_existing_snapshot_sends_targeted_update_and_does_not_whitelist()
+     {
         let dispatcher = DispatcherHandle::spawn(8, 8);
         let (client_id, mut rx) = dispatcher
             .add_client([pubkey_bytes(1)].into_iter().collect(), 8)
@@ -774,7 +775,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn missing_snapshot_whitelists_pubkey_and_sends_no_targeted_update() {
+    async fn test_missing_snapshot_whitelists_pubkey_and_sends_no_targeted_update()
+     {
         let dispatcher = DispatcherHandle::spawn(8, 8);
         let (client_id, mut rx) = dispatcher
             .add_client([pubkey_bytes(1)].into_iter().collect(), 8)
@@ -800,7 +802,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn snapshot_fetch_error_skips_pubkey_and_continues_with_rest() {
+    async fn test_snapshot_fetch_error_skips_pubkey_and_continues_with_rest() {
         let dispatcher = DispatcherHandle::spawn(8, 8);
         let (client_id, _rx) = dispatcher
             .add_client(
@@ -836,7 +838,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalid_snapshot_conversion_skips_pubkey() {
+    async fn test_invalid_snapshot_conversion_skips_pubkey() {
         let dispatcher = DispatcherHandle::spawn(8, 8);
         let (client_id, mut rx) = dispatcher
             .add_client([pubkey_bytes(1)].into_iter().collect(), 8)
@@ -866,7 +868,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn client_not_found_stops_bootstrap_loop() {
+    async fn test_client_not_found_stops_bootstrap_loop() {
         let dispatcher = DispatcherHandle::spawn(8, 8);
         let snapshot_store = FakeSnapshotStore::new(HashMap::from([
             (pubkey_b58(1), Ok(Some(snapshot_state(1)))),
@@ -888,7 +890,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn validator_whitelist_errors_are_swallowed_after_collecting_missing_pubkeys()
+    async fn test_validator_whitelist_errors_are_swallowed_after_collecting_missing_pubkeys()
      {
         let dispatcher = DispatcherHandle::spawn(8, 8);
         let (client_id, _rx) = dispatcher

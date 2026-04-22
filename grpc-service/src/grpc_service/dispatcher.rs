@@ -621,24 +621,24 @@ mod tests {
     }
 
     #[test]
-    fn extract_pubkey_returns_account_pubkey() {
+    fn test_extract_pubkey_returns_account_pubkey() {
         let update = update_for_pubkey(pubkey(1));
 
         assert_eq!(extract_pubkey(&update), Some(&pubkey(1)));
     }
 
     #[test]
-    fn extract_pubkey_rejects_non_account_update() {
+    fn test_extract_pubkey_rejects_non_account_update() {
         assert_eq!(extract_pubkey(&non_account_update()), None);
     }
 
     #[test]
-    fn extract_pubkey_rejects_invalid_pubkey_length() {
+    fn test_extract_pubkey_rejects_invalid_pubkey_length() {
         assert_eq!(extract_pubkey(&invalid_pubkey_len_update()), None);
     }
 
     #[tokio::test]
-    async fn try_deliver_update_reports_delivery() {
+    async fn test_try_deliver_update_reports_delivery() {
         let (tx, mut rx) = mpsc::channel(1);
         let update = Arc::new(update_for_pubkey(pubkey(1)));
 
@@ -650,7 +650,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn try_deliver_update_reports_channel_full() {
+    async fn test_try_deliver_update_reports_channel_full() {
         let (tx, _rx) = mpsc::channel(1);
         let first = Arc::new(update_for_pubkey(pubkey(1)));
         let second = Arc::new(update_for_pubkey(pubkey(2)));
@@ -663,7 +663,7 @@ mod tests {
     }
 
     #[test]
-    fn record_delivery_outcome_resets_health_on_success() {
+    fn test_record_delivery_outcome_resets_health_on_success() {
         let now = std::time::Instant::now();
         let mut health = health_with(
             3,
@@ -682,7 +682,7 @@ mod tests {
     }
 
     #[test]
-    fn record_delivery_outcome_tracks_backpressure_failure() {
+    fn test_record_delivery_outcome_tracks_backpressure_failure() {
         let now = std::time::Instant::now();
         let mut health = ClientHealth::default();
 
@@ -702,7 +702,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_client_health_removes_closed_channels() {
+    fn test_evaluate_client_health_removes_closed_channels() {
         let now = std::time::Instant::now();
         let health = health_with(
             1,
@@ -719,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_client_health_removes_excessive_failures() {
+    fn test_evaluate_client_health_removes_excessive_failures() {
         let now = std::time::Instant::now();
         let health = health_with(
             MAX_CONSECUTIVE_DELIVERY_FAILURES,
@@ -736,7 +736,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_client_health_removes_stale_backpressure() {
+    fn test_evaluate_client_health_removes_stale_backpressure() {
         let now = std::time::Instant::now();
         let health = health_with(
             1,
@@ -753,7 +753,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_client_health_retains_healthy_clients() {
+    fn test_evaluate_client_health_retains_healthy_clients() {
         let now = std::time::Instant::now();
         let health = health_with(
             1,
@@ -767,7 +767,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn add_client_registers_client_and_receives_matching_updates() {
+    async fn test_add_client_registers_client_and_receives_matching_updates() {
         let dispatcher = DispatcherHandle::spawn(8, 8);
         let filter = [pubkey(1)].into_iter().collect();
         let (_client_id, mut rx) =
@@ -786,7 +786,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn non_matching_updates_are_not_received() {
+    async fn test_non_matching_updates_are_not_received() {
         let dispatcher = DispatcherHandle::spawn(8, 8);
         let filter = [pubkey(1)].into_iter().collect();
         let (_client_id, mut rx) =
@@ -800,7 +800,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_filter_returns_exactly_newly_added_pubkeys() {
+    async fn test_update_filter_returns_exactly_newly_added_pubkeys() {
         let dispatcher = DispatcherHandle::spawn(8, 8);
         let initial = [pubkey(1)].into_iter().collect();
         let (client_id, _rx) = dispatcher.add_client(initial, 8).await.unwrap();
@@ -816,7 +816,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn patch_filter_returns_only_new_additions() {
+    async fn test_patch_filter_returns_only_new_additions() {
         let dispatcher = DispatcherHandle::spawn(8, 8);
         let initial = [pubkey(1), pubkey(2)].into_iter().collect();
         let (client_id, _rx) = dispatcher.add_client(initial, 8).await.unwrap();
@@ -834,7 +834,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remove_client_prevents_further_delivery() {
+    async fn test_remove_client_prevents_further_delivery() {
         let dispatcher = DispatcherHandle::spawn(8, 8);
         let filter = [pubkey(1)].into_iter().collect();
         let (client_id, mut rx) =
@@ -854,7 +854,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_to_client_returns_client_not_found_for_unknown_client() {
+    async fn test_send_to_client_returns_client_not_found_for_unknown_client() {
         let dispatcher = DispatcherHandle::spawn(8, 8);
 
         let result = dispatcher
@@ -866,7 +866,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn full_client_channel_returns_failed_but_retained_until_threshold() {
+    async fn test_full_client_channel_returns_failed_but_retained_until_threshold()
+     {
         let dispatcher = DispatcherHandle::spawn(8, 8);
         let filter = [pubkey(1)].into_iter().collect();
         let (client_id, _rx) = dispatcher.add_client(filter, 1).await.unwrap();
@@ -899,7 +900,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn closed_client_channel_returns_removed_by_policy() {
+    async fn test_closed_client_channel_returns_removed_by_policy() {
         let dispatcher = DispatcherHandle::spawn(8, 8);
         let filter = [pubkey(1)].into_iter().collect();
         let (client_id, rx) = dispatcher.add_client(filter, 1).await.unwrap();

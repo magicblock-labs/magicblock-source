@@ -403,7 +403,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_replays_snapshots_then_live_updates() {
+    async fn test_run_replays_snapshots_then_live_updates() {
         let snapshot_store = FakeSnapshotStore::new(Ok(vec![account_state(1)]));
         let update_source =
             FakeAccountUpdateSource::new(vec![Ok(stream_message(2))]);
@@ -428,7 +428,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_without_snapshots_and_without_filter_writes_generic_status() {
+    async fn test_run_without_snapshots_and_without_filter_writes_generic_status()
+     {
         let snapshot_store = FakeSnapshotStore::new(Ok(Vec::new()));
         let update_source = FakeAccountUpdateSource::new(Vec::new());
         let status_sink = RecordingStatusSink::new();
@@ -450,7 +451,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_without_snapshots_and_with_filter_writes_specific_status() {
+    async fn test_run_without_snapshots_and_with_filter_writes_specific_status()
+    {
         let filter = PubkeyFilter::parse(&bytes_to_base58(&[9; 32])).unwrap();
         let snapshot_store = FakeSnapshotStore::new(Ok(Vec::new()));
         let update_source = FakeAccountUpdateSource::new(Vec::new());
@@ -476,7 +478,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn snapshot_fetch_error_returns_immediately_and_never_calls_update_source()
+    async fn test_snapshot_fetch_error_returns_immediately_and_never_calls_update_source()
      {
         let snapshot_store =
             FakeSnapshotStore::new(Err("snapshot fetch failed"));
@@ -497,7 +499,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn snapshot_sink_failure_returns_immediately_and_never_calls_update_source()
+    async fn test_snapshot_sink_failure_returns_immediately_and_never_calls_update_source()
      {
         let snapshot_store = FakeSnapshotStore::new(Ok(vec![account_state(1)]));
         let update_source =
@@ -517,7 +519,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn live_sink_failure_propagates_from_update_source_callback() {
+    async fn test_live_sink_failure_propagates_from_update_source_callback() {
         let snapshot_store = FakeSnapshotStore::new(Ok(Vec::new()));
         let update_source =
             FakeAccountUpdateSource::new(vec![Ok(stream_message(1))]);
@@ -536,7 +538,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_source_error_propagates() {
+    async fn test_update_source_error_propagates() {
         let snapshot_store = FakeSnapshotStore::new(Ok(Vec::new()));
         let update_source =
             FakeAccountUpdateSource::new(vec![Err("source failed")]);

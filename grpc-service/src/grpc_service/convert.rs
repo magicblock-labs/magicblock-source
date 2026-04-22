@@ -159,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_events_convert_to_account_updates() {
+    fn test_snapshot_events_convert_to_account_updates() {
         let update = to_subscribe_update(&AccountEvent::Snapshot(
             sample_account_state(),
         ))
@@ -177,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn live_events_convert_expected_account_fields() {
+    fn test_live_events_convert_expected_account_fields() {
         let update =
             to_subscribe_update(&AccountEvent::Live(sample_stream_message()))
                 .unwrap();
@@ -199,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn live_events_leave_txn_signature_empty_when_absent() {
+    fn test_live_events_leave_txn_signature_empty_when_absent() {
         let mut message = sample_stream_message();
         message.account.txn_signature_b58 = None;
 
@@ -215,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_snapshot_pubkey_base58_returns_conversion_error() {
+    fn test_invalid_snapshot_pubkey_base58_returns_conversion_error() {
         let mut state = sample_account_state();
         state.pubkey_b58 = "0badpubkey".to_owned();
 
@@ -226,7 +226,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_snapshot_owner_base58_returns_conversion_error() {
+    fn test_invalid_snapshot_owner_base58_returns_conversion_error() {
         let mut state = sample_account_state();
         state.owner_b58 = "0badowner".to_owned();
 
@@ -237,7 +237,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_live_txn_signature_base58_returns_conversion_error() {
+    fn test_invalid_live_txn_signature_base58_returns_conversion_error() {
         let mut message = sample_stream_message();
         message.account.txn_signature_b58 = Some("0badsignature".to_owned());
 

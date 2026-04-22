@@ -327,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn pubkey_bytes_literal_formats_expected_hex() {
+    fn test_pubkey_bytes_literal_formats_expected_hex() {
         let pubkey =
             PubkeyFilter::parse(&bytes_to_base58(&valid_pubkey_bytes()))
                 .unwrap();
@@ -339,7 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_accounts_response_ignores_metadata_query_id_lines() {
+    fn test_parse_accounts_response_ignores_metadata_query_id_lines() {
         let body = response_body(&[
             json!({ "queryId": "transient_1" }),
             valid_ksql_row(&valid_pubkey_bytes()),
@@ -352,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_accounts_response_parses_one_valid_row() {
+    fn test_parse_accounts_response_parses_one_valid_row() {
         let body = response_body(&[valid_ksql_row(&valid_pubkey_bytes())]);
 
         let rows = parse_accounts_response(&body, None).unwrap();
@@ -372,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_accounts_response_parses_multiple_valid_rows() {
+    fn test_parse_accounts_response_parses_multiple_valid_rows() {
         let another_pubkey: Vec<u8> = (64..96).collect();
         let body = response_body(&[
             valid_ksql_row(&valid_pubkey_bytes()),
@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_accounts_response_applies_pubkey_filter() {
+    fn test_parse_accounts_response_applies_pubkey_filter() {
         let another_pubkey: Vec<u8> = (64..96).collect();
         let filter =
             PubkeyFilter::parse(&bytes_to_base58(&valid_pubkey_bytes()))
@@ -404,13 +404,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_accounts_response_returns_empty_for_empty_or_whitespace_body() {
+    fn test_parse_accounts_response_returns_empty_for_empty_or_whitespace_body()
+    {
         assert!(parse_accounts_response("", None).unwrap().is_empty());
         assert!(parse_accounts_response(" \n\t\n", None).unwrap().is_empty());
     }
 
     #[test]
-    fn parse_accounts_response_rejects_invalid_top_level_json_shapes() {
+    fn test_parse_accounts_response_rejects_invalid_top_level_json_shapes() {
         let body = response_body(&[json!("not an array")]);
         let error = parse_accounts_response(&body, None).unwrap_err();
 
@@ -421,7 +422,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_accounts_response_returns_ksql_error_response_for_type_lines() {
+    fn test_parse_accounts_response_returns_ksql_error_response_for_type_lines()
+    {
         let body = response_body(&[json!({
             "@type": "statement_error",
             "message": "bad query"
@@ -441,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn valid_pubkey_field_helper_returns_encoded_32_byte_pubkey() {
+    fn test_valid_pubkey_field_helper_returns_encoded_32_byte_pubkey() {
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(valid_base64_pubkey_field())
             .unwrap();
@@ -450,7 +452,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_account_row_rejects_wrong_column_count() {
+    fn test_parse_account_row_rejects_wrong_column_count() {
         let error = parse_account_row(&[json!(valid_base64_pubkey_field())])
             .unwrap_err();
 
@@ -461,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_account_row_rejects_invalid_slot_integer() {
+    fn test_parse_account_row_rejects_invalid_slot_integer() {
         let mut row = valid_ksql_row(&valid_pubkey_bytes());
         row.as_array_mut().unwrap()[1] = json!("bad-slot");
 
@@ -474,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_account_row_rejects_invalid_lamports_integer() {
+    fn test_parse_account_row_rejects_invalid_lamports_integer() {
         let mut row = valid_ksql_row(&valid_pubkey_bytes());
         row.as_array_mut().unwrap()[2] = json!("bad-lamports");
 
@@ -490,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_account_row_rejects_non_boolean_executable() {
+    fn test_parse_account_row_rejects_non_boolean_executable() {
         let mut row = valid_ksql_row(&valid_pubkey_bytes());
         row.as_array_mut().unwrap()[4] = json!("true");
 
@@ -506,7 +508,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_account_row_rejects_invalid_rent_epoch_integer() {
+    fn test_parse_account_row_rejects_invalid_rent_epoch_integer() {
         let mut row = valid_ksql_row(&valid_pubkey_bytes());
         row.as_array_mut().unwrap()[5] = json!(false);
 
@@ -522,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_account_row_rejects_invalid_write_version_integer() {
+    fn test_parse_account_row_rejects_invalid_write_version_integer() {
         let mut row = valid_ksql_row(&valid_pubkey_bytes());
         row.as_array_mut().unwrap()[7] = json!(true);
 
@@ -538,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_account_row_rejects_invalid_pubkey_base64() {
+    fn test_parse_account_row_rejects_invalid_pubkey_base64() {
         let mut row = valid_ksql_row(&valid_pubkey_bytes());
         row.as_array_mut().unwrap()[0] = json!("%%%");
 
@@ -554,7 +556,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_account_row_rejects_invalid_owner_base64() {
+    fn test_parse_account_row_rejects_invalid_owner_base64() {
         let mut row = valid_ksql_row(&valid_pubkey_bytes());
         row.as_array_mut().unwrap()[3] = json!("%%%");
 
@@ -567,7 +569,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_account_row_rejects_invalid_data_base64() {
+    fn test_parse_account_row_rejects_invalid_data_base64() {
         let mut row = valid_ksql_row(&valid_pubkey_bytes());
         row.as_array_mut().unwrap()[6] = json!("%%%");
 
@@ -580,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_account_row_rejects_invalid_txn_signature_base64() {
+    fn test_parse_account_row_rejects_invalid_txn_signature_base64() {
         let mut row = valid_ksql_row(&valid_pubkey_bytes());
         row.as_array_mut().unwrap()[8] = json!("%%%");
 
@@ -590,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_account_row_accepts_empty_data() {
+    fn test_parse_account_row_accepts_empty_data() {
         let mut row = valid_ksql_row(&valid_pubkey_bytes());
         row.as_array_mut().unwrap()[6] = json!("");
 
@@ -600,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_account_row_accepts_empty_optional_txn_signature() {
+    fn test_parse_account_row_accepts_empty_optional_txn_signature() {
         let mut row = valid_ksql_row(&valid_pubkey_bytes());
         row.as_array_mut().unwrap()[8] = json!("");
 
@@ -610,38 +612,38 @@ mod tests {
     }
 
     #[test]
-    fn parse_u64_field_accepts_u64_values() {
+    fn test_parse_u64_field_accepts_u64_values() {
         assert_eq!(parse_u64_field(&json!(42_u64)).unwrap(), 42);
     }
 
     #[test]
-    fn parse_u64_field_accepts_non_negative_i64_values() {
+    fn test_parse_u64_field_accepts_non_negative_i64_values() {
         assert_eq!(parse_u64_field(&json!(42_i64)).unwrap(), 42);
     }
 
     #[test]
-    fn parse_u64_field_rejects_string_values() {
+    fn test_parse_u64_field_rejects_string_values() {
         let error = parse_u64_field(&json!("42")).unwrap_err();
 
         assert!(matches!(error, GeykagError::InvalidJsonInteger { .. }));
     }
 
     #[test]
-    fn parse_u64_field_rejects_boolean_values() {
+    fn test_parse_u64_field_rejects_boolean_values() {
         let error = parse_u64_field(&json!(true)).unwrap_err();
 
         assert!(matches!(error, GeykagError::InvalidJsonInteger { .. }));
     }
 
     #[test]
-    fn decode_base64_field_rejects_non_string_json() {
+    fn test_decode_base64_field_rejects_non_string_json() {
         let error = decode_base64_field(&json!(123)).unwrap_err();
 
         assert!(matches!(error, GeykagError::ExpectedBase64String));
     }
 
     #[test]
-    fn decode_optional_base64_field_rejects_non_string_json() {
+    fn test_decode_optional_base64_field_rejects_non_string_json() {
         let error = decode_optional_base64_field(&json!(123)).unwrap_err();
 
         assert!(matches!(error, GeykagError::ExpectedOptionalBase64String));
