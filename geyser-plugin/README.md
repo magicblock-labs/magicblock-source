@@ -21,8 +21,14 @@ This plugin publishes confirmed Solana account updates to Kafka.
 
 ## Quick Start
 
+```json
+{
+  "libpath": "../target/release/libsolana_accountsdb_plugin_kafka.so",
+  "config_file": "plugin-config.toml"
+}
+```
+
 ```toml
-libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
 
 [kafka]
 bootstrap_servers = "localhost:9092"
@@ -75,11 +81,20 @@ The Solana validator and this plugin must be built against matching Solana and R
 
 ## Configuration
 
-Config is provided as TOML.
+Config is split into two files:
+
+- `plugin-config.json`: validator-facing JSON wrapper passed to `--geyser-plugin-config`
+- `plugin-config.toml`: plugin runtime config loaded by this crate
+
+The validator wrapper must contain:
+
+- `libpath`: path to the plugin shared library
+- `config_file`: path to the plugin TOML config, relative to the JSON file or absolute
+
+The runtime config is TOML.
 
 Supported fields:
 
-- `libpath`: path to the plugin shared library
 - `[kafka]`
   - `bootstrap_servers`: Kafka bootstrap broker list
   - `topic`: Kafka topic for wrapped account updates
@@ -96,7 +111,6 @@ Supported fields:
 Minimal config:
 
 ```toml
-libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
 
 [kafka]
 bootstrap_servers = "localhost:9092"

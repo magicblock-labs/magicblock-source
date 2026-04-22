@@ -1,5 +1,3 @@
-libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
-
 [kafka]
 bootstrap_servers = "localhost:9092"
 topic = "solana.testnet.account_updates"
