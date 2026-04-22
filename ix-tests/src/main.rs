@@ -4,24 +4,24 @@ mod cli;
 #[allow(dead_code)]
 mod client;
 mod config;
+mod context;
 mod expectation;
 mod layout;
 #[allow(dead_code)]
 mod observation;
 mod runner;
 mod scenario;
+mod scenarios;
 mod service;
 #[allow(dead_code)]
 mod validator;
 
 use tracing::info;
 
-use crate::accounts::{NamedAccount, ScenarioAccounts};
-use crate::client::TestGrpcClient;
-use crate::expectation::{CheckpointRunner, CheckpointSpec, ClientCursor};
-use crate::layout::ServiceInstance;
-use crate::scenario::ScenarioName;
-use crate::service::{ServiceController, ServiceSpec};
+use crate::accounts::ScenarioAccounts;
+use crate::context::ScenarioContext;
+use crate::expectation::CheckpointRunner;
+use crate::service::ServiceController;
 use crate::validator::ValidatorDriver;
 
 fn init_tracing() {
@@ -58,40 +58,28 @@ async fn main() -> anyhow::Result<()> {
     let names: Vec<&str> = scenarios.iter().map(|s| s.as_str()).collect();
     info!(scenarios = ?names, "resolved scenario execution order");
 
-    let controller = ServiceController::new(&config);
-
     for scenario in &scenarios {
         info!(scenario = scenario.as_str(), "running scenario");
         let artifacts = artifacts::RunArtifacts::new(&config, *scenario)?;
+        let ctx = ScenarioContext {
+            suite_config: config.clone(),
+            artifacts,
+            service_controller: ServiceController::new(&config),
+            validator: ValidatorDriver::new(&config),
+            checkpoint_runner: CheckpointRunner::new(&config),
+            accounts: ScenarioAccounts::for_scenario(*scenario),
+        };
 
-        if *scenario == ScenarioName::SingleBasic {
-            let spec = ServiceSpec::for_instance(ServiceInstance::One);
-            let svc = controller.start(&spec, &artifacts).await?;
-
-            let accounts =
-                ScenarioAccounts::for_scenario(ScenarioName::SingleBasic);
-            let validator = ValidatorDriver::new(&config);
-            validator.fund_payer().await?;
-            validator
-                .airdrop(&accounts.pubkey(NamedAccount::SimpleA), 1_000_000)
-                .await?;
-
-            let checkpoint_runner = CheckpointRunner::new(&config);
-            let checkpoint = CheckpointSpec {
-                name: "empty",
-                clients: Vec::new(),
-            };
-            let clients: Vec<TestGrpcClient> = Vec::new();
-            let mut cursors: Vec<ClientCursor> = Vec::new();
-            checkpoint_runner
-                .wait_until_satisfied(&checkpoint, &clients, &mut cursors)
-                .await?;
-
-            controller.shutdown(svc).await?;
+        match scenarios::run_scenario(*scenario, &ctx).await {
+            Ok(()) => {
+                ctx.artifacts.cleanup_success()?;
+                info!(scenario = scenario.as_str(), "scenario passed");
+            }
+            Err(error) => {
+                ctx.artifacts.persist_failure()?;
+                return Err(error);
+            }
         }
-
-        artifacts.cleanup_success()?;
-        info!(scenario = scenario.as_str(), "scenario passed");
     }
 
     Ok(())

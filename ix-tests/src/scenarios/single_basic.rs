@@ -1,0 +1,188 @@
+use anyhow::Context;
+use solana_pubkey::Pubkey;
+
+use crate::accounts::NamedAccount;
+use crate::client::TestGrpcClient;
+use crate::context::ScenarioContext;
+use crate::expectation::{
+    CheckpointSpec, ClientCheckpoint, ClientCursor, ExpectedUpdate,
+};
+use crate::layout::ServiceInstance;
+use crate::service::{ManagedService, ServiceSpec};
+
+const OWNER_DATA_SPACE: u64 = 64;
+const SYNTHETIC_OWNER_BYTES: [u8; 32] = [
+    0x31, 0x22, 0x13, 0x04, 0xF5, 0xE6, 0xD7, 0xC8, 0xB9, 0xAA, 0x9B, 0x8C,
+    0x7D, 0x6E, 0x5F, 0x40, 0x11, 0x32, 0x53, 0x74, 0x95, 0xB6, 0xD7, 0xF8,
+    0x18, 0x29, 0x3A, 0x4B, 0x5C, 0x6D, 0x7E, 0x8F,
+];
+
+pub async fn run(ctx: &ScenarioContext) -> anyhow::Result<()> {
+    let spec = ServiceSpec::for_instance(ServiceInstance::One);
+    let mut service =
+        Some(ctx.service_controller.start(&spec, &ctx.artifacts).await?);
+    let mut clients = Vec::new();
+    let mut cursors = Vec::new();
+
+    let result =
+        run_inner(ctx, &spec.endpoint, &mut clients, &mut cursors).await;
+
+    let client_shutdown = shutdown_clients(clients).await;
+    let service_shutdown =
+        shutdown_service(&ctx.service_controller, &mut service).await;
+
+    result?;
+    client_shutdown?;
+    service_shutdown?;
+    Ok(())
+}
+
+async fn run_inner(
+    ctx: &ScenarioContext,
+    endpoint: &str,
+    clients: &mut Vec<TestGrpcClient>,
+    cursors: &mut Vec<ClientCursor>,
+) -> anyhow::Result<()> {
+    for id in 0..4 {
+        let client = TestGrpcClient::connect(
+            id,
+            ServiceInstance::One,
+            endpoint.to_owned(),
+        )
+        .await
+        .with_context(|| format!("failed to connect client {id}"))?;
+        cursors.push(ClientCursor {
+            client_id: id,
+            next_index: 0,
+        });
+        clients.push(client);
+    }
+
+    clients[0]
+        .replace_subscription(&[ctx.accounts.pubkey_b58(NamedAccount::SimpleA)])
+        .await?;
+    clients[1]
+        .replace_subscription(&[ctx.accounts.pubkey_b58(NamedAccount::SimpleB)])
+        .await?;
+    clients[2]
+        .replace_subscription(&[ctx.accounts.pubkey_b58(NamedAccount::SimpleC)])
+        .await?;
+    clients[3]
+        .replace_subscription(&[ctx
+            .accounts
+            .pubkey_b58(NamedAccount::OwnerData)])
+        .await?;
+
+    ctx.validator.fund_payer().await?;
+
+    let simple_a_sig = ctx
+        .validator
+        .airdrop(&ctx.accounts.pubkey(NamedAccount::SimpleA), 1_000_000)
+        .await?;
+    let simple_b_sig = ctx
+        .validator
+        .airdrop(&ctx.accounts.pubkey(NamedAccount::SimpleB), 2_000_000)
+        .await?;
+    let simple_c_sig = ctx
+        .validator
+        .airdrop(&ctx.accounts.pubkey(NamedAccount::SimpleC), 3_000_000)
+        .await?;
+
+    let basic_checkpoint = CheckpointSpec {
+        name: "basic-lamports",
+        clients: vec![
+            lamport_client_checkpoint(
+                0,
+                ctx.accounts.pubkey_b58(NamedAccount::SimpleA),
+                1_000_000,
+                simple_a_sig,
+            ),
+            lamport_client_checkpoint(
+                1,
+                ctx.accounts.pubkey_b58(NamedAccount::SimpleB),
+                2_000_000,
+                simple_b_sig,
+            ),
+            lamport_client_checkpoint(
+                2,
+                ctx.accounts.pubkey_b58(NamedAccount::SimpleC),
+                3_000_000,
+                simple_c_sig,
+            ),
+        ],
+    };
+    ctx.checkpoint_runner
+        .wait_until_satisfied(&basic_checkpoint, clients, cursors)
+        .await?;
+
+    let rent_lamports =
+        ctx.validator.rent_exempt_balance(OWNER_DATA_SPACE).await?;
+    ctx.validator
+        .airdrop(&ctx.accounts.pubkey(NamedAccount::OwnerData), rent_lamports)
+        .await?;
+
+    let synthetic_owner = Pubkey::new_from_array(SYNTHETIC_OWNER_BYTES);
+    let owner_data_sig = ctx
+        .validator
+        .allocate_and_assign(
+            ctx.accounts.keypair(NamedAccount::OwnerData),
+            OWNER_DATA_SPACE,
+            synthetic_owner,
+        )
+        .await?;
+
+    let owner_data_expected = ExpectedUpdate {
+        pubkey_b58: Some(ctx.accounts.pubkey_b58(NamedAccount::OwnerData)),
+        owner_b58: Some(synthetic_owner.to_string()),
+        txn_signature_b58: Some(Some(owner_data_sig)),
+        data: None,
+        ..Default::default()
+    };
+    let owner_data_checkpoint = CheckpointSpec {
+        name: "owner-data-change",
+        clients: vec![ClientCheckpoint {
+            client_id: 3,
+            allowed: vec![owner_data_expected.clone()],
+            required: vec![owner_data_expected],
+        }],
+    };
+    ctx.checkpoint_runner
+        .wait_until_satisfied(&owner_data_checkpoint, clients, cursors)
+        .await
+}
+
+fn lamport_client_checkpoint(
+    client_id: usize,
+    pubkey_b58: String,
+    lamports: u64,
+    txn_signature_b58: String,
+) -> ClientCheckpoint {
+    let expected = ExpectedUpdate {
+        pubkey_b58: Some(pubkey_b58),
+        lamports: Some(lamports),
+        txn_signature_b58: Some(Some(txn_signature_b58)),
+        ..Default::default()
+    };
+    ClientCheckpoint {
+        client_id,
+        allowed: vec![expected.clone()],
+        required: vec![expected],
+    }
+}
+
+async fn shutdown_clients(clients: Vec<TestGrpcClient>) -> anyhow::Result<()> {
+    for client in clients {
+        client.shutdown().await?;
+    }
+    Ok(())
+}
+
+async fn shutdown_service(
+    controller: &crate::service::ServiceController,
+    service: &mut Option<ManagedService>,
+) -> anyhow::Result<()> {
+    if let Some(service) = service.take() {
+        controller.shutdown(service).await?;
+    }
+    Ok(())
+}

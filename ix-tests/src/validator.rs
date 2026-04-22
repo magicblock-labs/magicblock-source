@@ -134,6 +134,15 @@ impl ValidatorDriver {
         Ok(sig.to_string())
     }
 
+    pub async fn rent_exempt_balance(&self, space: u64) -> anyhow::Result<u64> {
+        self.rpc
+            .get_minimum_balance_for_rent_exemption(space as usize)
+            .await
+            .with_context(|| {
+                format!("failed to fetch rent-exempt balance for {space} bytes")
+            })
+    }
+
     async fn confirm_signature(
         &self,
         sig: &solana_signature::Signature,
