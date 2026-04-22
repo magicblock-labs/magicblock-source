@@ -21,7 +21,7 @@ CLIENT_REST ?= http://127.0.0.1:3030
 help:
 	@echo "Available targets:"
 	@echo "  build                         - Build all Rust workspace packages"
-	@echo "  check                         - Run workspace fmt, clippy, build, and nextest"
+	@echo "  check                         - Run workspace fmt, clippy, build, and test"
 	@echo "  kafka-up                      - Start the Kafka/ksqlDB stack"
 	@echo "  kafka-down                    - Stop and remove the Kafka/ksqlDB stack"
 	@echo "  kafka-ready                   - Start the stack and initialize stream/table/schema"
@@ -42,9 +42,9 @@ build:
 
 check:
 	cargo fmt --all -- --check
-	cargo clippy --workspace --all-targets -- -D warnings
+	cargo clippy --workspace --all-targets --no-deps -- -D warnings
 	cargo build --workspace
-	cargo nextest run -j16 --workspace
+	cargo test --workspace -- --test-threads=16
 
 kafka-up:
 	$(MAKE) -C kafka-setup up
