@@ -2,8 +2,12 @@
 mod accounts;
 mod artifacts;
 mod cli;
+#[allow(dead_code)]
+mod client;
 mod config;
 mod layout;
+#[allow(dead_code)]
+mod observation;
 mod runner;
 mod scenario;
 mod service;

@@ -1,0 +1,179 @@
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use anyhow::Context;
+use helius_laserstream::grpc::geyser_client::GeyserClient;
+use helius_laserstream::grpc::subscribe_update::UpdateOneof;
+use helius_laserstream::grpc::{
+    SubscribeRequest, SubscribeRequestFilterAccounts,
+};
+use tokio::sync::mpsc;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReceiverStream;
+
+use crate::layout::ServiceInstance;
+use crate::observation::{ClientLog, ObservedUpdate};
+
+#[allow(dead_code)]
+pub struct TestGrpcClient {
+    pub id: usize,
+    pub service: ServiceInstance,
+    pub endpoint: String,
+    log: ClientLog,
+    request_tx: mpsc::Sender<SubscribeRequest>,
+    receive_task: tokio::task::JoinHandle<anyhow::Result<()>>,
+}
+
+#[allow(dead_code)]
+impl TestGrpcClient {
+    pub async fn connect(
+        id: usize,
+        service: ServiceInstance,
+        endpoint: String,
+    ) -> anyhow::Result<Self> {
+        let mut client =
+            GeyserClient::connect(endpoint.clone()).await.with_context(
+                || format!("client {id}: failed to connect to {endpoint}"),
+            )?;
+
+        let (tx, rx) = mpsc::channel::<SubscribeRequest>(16);
+
+        tx.send(SubscribeRequest::default())
+            .await
+            .context("failed to send initial empty subscribe request")?;
+
+        let response = client
+            .subscribe(ReceiverStream::new(rx))
+            .await
+            .with_context(|| format!("client {id}: subscribe call failed"))?;
+        let mut update_stream = response.into_inner();
+
+        let log = ClientLog::new();
+        let log_clone = log.clone();
+
+        let receive_task = tokio::spawn(async move {
+            while let Some(item) = update_stream.next().await {
+                match item {
+                    Ok(update) => {
+                        if let Some(UpdateOneof::Account(account_update)) =
+                            update.update_oneof
+                            && let Some(info) = account_update.account
+                        {
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis();
+
+                            let observed = ObservedUpdate {
+                                client_id: id,
+                                service,
+                                pubkey_b58: bs58::encode(&info.pubkey)
+                                    .into_string(),
+                                slot: account_update.slot,
+                                lamports: info.lamports,
+                                owner_b58: bs58::encode(&info.owner)
+                                    .into_string(),
+                                executable: info.executable,
+                                rent_epoch: info.rent_epoch,
+                                write_version: info.write_version,
+                                txn_signature_b58: info
+                                    .txn_signature
+                                    .as_ref()
+                                    .map(|b| bs58::encode(b).into_string()),
+                                data: info.data,
+                                received_at_millis: now,
+                            };
+
+                            log_clone.push(observed);
+                        }
+                    }
+                    Err(status) => {
+                        tracing::warn!(
+                            client_id = id,
+                            %status,
+                            "stream error"
+                        );
+                        break;
+                    }
+                }
+            }
+            Ok(())
+        });
+
+        Ok(Self {
+            id,
+            service,
+            endpoint,
+            log,
+            request_tx: tx,
+            receive_task,
+        })
+    }
+
+    pub async fn replace_subscription(
+        &self,
+        pubkeys: &[String],
+    ) -> anyhow::Result<()> {
+        let req = SubscribeRequest {
+            accounts: HashMap::from([(
+                "replace".to_owned(),
+                SubscribeRequestFilterAccounts {
+                    account: pubkeys.to_vec(),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+        self.request_tx
+            .send(req)
+            .await
+            .context("failed to send replace subscription request")
+    }
+
+    pub async fn patch_subscription(
+        &self,
+        add: &[String],
+        remove: &[String],
+    ) -> anyhow::Result<()> {
+        let mut accounts = HashMap::new();
+        if !add.is_empty() {
+            accounts.insert(
+                "add".to_owned(),
+                SubscribeRequestFilterAccounts {
+                    account: add.to_vec(),
+                    ..Default::default()
+                },
+            );
+        }
+        if !remove.is_empty() {
+            accounts.insert(
+                "remove".to_owned(),
+                SubscribeRequestFilterAccounts {
+                    account: remove.to_vec(),
+                    ..Default::default()
+                },
+            );
+        }
+        let req = SubscribeRequest {
+            accounts,
+            ..Default::default()
+        };
+        self.request_tx
+            .send(req)
+            .await
+            .context("failed to send patch subscription request")
+    }
+
+    pub fn log(&self) -> &ClientLog {
+        &self.log
+    }
+
+    pub async fn shutdown(self) -> anyhow::Result<()> {
+        drop(self.request_tx);
+        match self.receive_task.await {
+            Ok(result) => result,
+            Err(e) if e.is_cancelled() => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
