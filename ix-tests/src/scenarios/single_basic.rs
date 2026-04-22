@@ -8,6 +8,7 @@ use crate::expectation::{
     CheckpointSpec, ClientCheckpoint, ClientCursor, ExpectedUpdate,
 };
 use crate::layout::ServiceInstance;
+use crate::scenarios::ScenarioFailure;
 use crate::service::{ManagedService, ServiceSpec};
 
 const OWNER_DATA_SPACE: u64 = 64;
@@ -17,23 +18,29 @@ const SYNTHETIC_OWNER_BYTES: [u8; 32] = [
     0x18, 0x29, 0x3A, 0x4B, 0x5C, 0x6D, 0x7E, 0x8F,
 ];
 
-pub async fn run(ctx: &ScenarioContext) -> anyhow::Result<()> {
+pub async fn run(ctx: &ScenarioContext) -> Result<(), ScenarioFailure> {
     let spec = ServiceSpec::for_instance(ServiceInstance::One);
-    let mut service =
-        Some(ctx.service_controller.start(&spec, &ctx.artifacts).await?);
+    let mut service = Some(
+        ctx.service_controller
+            .start(&spec, &ctx.artifacts)
+            .await
+            .map_err(scenario_failure_without_clients)?,
+    );
     let mut clients = Vec::new();
     let mut cursors = Vec::new();
 
     let result =
         run_inner(ctx, &spec.endpoint, &mut clients, &mut cursors).await;
+    if let Err(error) = result {
+        return Err(ScenarioFailure { error, clients });
+    }
 
-    let client_shutdown = shutdown_clients(clients).await;
-    let service_shutdown =
-        shutdown_service(&ctx.service_controller, &mut service).await;
-
-    result?;
-    client_shutdown?;
-    service_shutdown?;
+    shutdown_clients(clients)
+        .await
+        .map_err(scenario_failure_without_clients)?;
+    shutdown_service(&ctx.service_controller, &mut service)
+        .await
+        .map_err(scenario_failure_without_clients)?;
     Ok(())
 }
 
@@ -185,4 +192,11 @@ async fn shutdown_service(
         controller.shutdown(service).await?;
     }
     Ok(())
+}
+
+fn scenario_failure_without_clients(error: anyhow::Error) -> ScenarioFailure {
+    ScenarioFailure {
+        error,
+        clients: Vec::new(),
+    }
 }

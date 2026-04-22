@@ -8,20 +8,23 @@ use crate::expectation::{
 };
 use crate::layout::ServiceInstance;
 use crate::observation::ClientLog;
+use crate::scenarios::ScenarioFailure;
 use crate::service::{ManagedService, ServiceSpec};
 
-pub async fn run(ctx: &ScenarioContext) -> anyhow::Result<()> {
+pub async fn run(ctx: &ScenarioContext) -> Result<(), ScenarioFailure> {
     let spec_one = ServiceSpec::for_instance(ServiceInstance::One);
     let spec_two = ServiceSpec::for_instance(ServiceInstance::Two);
     let mut service_one = Some(
         ctx.service_controller
             .start(&spec_one, &ctx.artifacts)
-            .await?,
+            .await
+            .map_err(scenario_failure_without_clients)?,
     );
     let mut service_two = Some(
         ctx.service_controller
             .start(&spec_two, &ctx.artifacts)
-            .await?,
+            .await
+            .map_err(scenario_failure_without_clients)?,
     );
     let mut active_clients = Vec::new();
     let mut cursors = Vec::new();
@@ -35,17 +38,22 @@ pub async fn run(ctx: &ScenarioContext) -> anyhow::Result<()> {
         &mut cursors,
     )
     .await;
+    if let Err(error) = result {
+        return Err(ScenarioFailure {
+            error,
+            clients: active_clients,
+        });
+    }
 
-    let client_shutdown = shutdown_clients(active_clients).await;
-    let service_one_shutdown =
-        shutdown_service(&ctx.service_controller, &mut service_one).await;
-    let service_two_shutdown =
-        shutdown_service(&ctx.service_controller, &mut service_two).await;
-
-    result?;
-    client_shutdown?;
-    service_one_shutdown?;
-    service_two_shutdown?;
+    shutdown_clients(active_clients)
+        .await
+        .map_err(scenario_failure_without_clients)?;
+    shutdown_service(&ctx.service_controller, &mut service_one)
+        .await
+        .map_err(scenario_failure_without_clients)?;
+    shutdown_service(&ctx.service_controller, &mut service_two)
+        .await
+        .map_err(scenario_failure_without_clients)?;
     Ok(())
 }
 
@@ -413,4 +421,11 @@ struct ParkedClientLog {
     client_id: usize,
     log: ClientLog,
     len: usize,
+}
+
+fn scenario_failure_without_clients(error: anyhow::Error) -> ScenarioFailure {
+    ScenarioFailure {
+        error,
+        clients: Vec::new(),
+    }
 }

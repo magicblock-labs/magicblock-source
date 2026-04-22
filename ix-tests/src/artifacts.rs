@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
+use serde::Serialize;
 
+use crate::client::TestGrpcClient;
 use crate::config::SuiteConfig;
 use crate::layout::ServiceInstance;
 use crate::scenario::ScenarioName;
@@ -58,6 +60,36 @@ impl RunArtifacts {
     pub fn client_updates_path(&self, scenario: ScenarioName) -> PathBuf {
         self.run_dir
             .join(format!("{}-client-updates.json", scenario.as_str()))
+    }
+
+    pub fn write_client_updates(
+        &self,
+        scenario: ScenarioName,
+        clients: &[TestGrpcClient],
+    ) -> anyhow::Result<()> {
+        #[derive(Serialize)]
+        struct ClientUpdates {
+            client_id: usize,
+            service: ServiceInstance,
+            endpoint: String,
+            updates: Vec<crate::observation::ObservedUpdate>,
+        }
+
+        let payload = clients
+            .iter()
+            .map(|client| ClientUpdates {
+                client_id: client.id,
+                service: client.service,
+                endpoint: client.endpoint.clone(),
+                updates: client.log().snapshot(),
+            })
+            .collect::<Vec<_>>();
+        let path = self.client_updates_path(scenario);
+        let json = serde_json::to_vec_pretty(&payload)
+            .context("failed to serialize client updates")?;
+        std::fs::write(&path, json).with_context(|| {
+            format!("failed to write client updates to {}", path.display())
+        })
     }
 
     #[allow(dead_code)]

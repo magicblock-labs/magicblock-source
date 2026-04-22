@@ -1,6 +1,8 @@
+use serde::Serialize;
+
 use crate::scenario::ScenarioName;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[allow(dead_code)]
 pub enum ServiceInstance {
     One,

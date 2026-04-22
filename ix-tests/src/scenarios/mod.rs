@@ -3,20 +3,29 @@ mod dual_restart;
 mod single_basic;
 mod single_load;
 
-use anyhow::bail;
+use anyhow::anyhow;
 
+use crate::client::TestGrpcClient;
 use crate::context::ScenarioContext;
 use crate::scenario::ScenarioName;
+
+pub struct ScenarioFailure {
+    pub error: anyhow::Error,
+    pub clients: Vec<TestGrpcClient>,
+}
 
 pub async fn run_scenario(
     name: ScenarioName,
     ctx: &ScenarioContext,
-) -> anyhow::Result<()> {
+) -> Result<(), ScenarioFailure> {
     match name {
         ScenarioName::SingleBasic => single_basic::run(ctx).await,
         ScenarioName::SingleLoad => single_load::run(ctx).await,
         ScenarioName::DualConcurrent => dual_concurrent::run(ctx).await,
         ScenarioName::DualRestart => dual_restart::run(ctx).await,
-        ScenarioName::All => bail!("scenario dispatch does not accept 'all'"),
+        ScenarioName::All => Err(ScenarioFailure {
+            error: anyhow!("scenario dispatch does not accept 'all'"),
+            clients: Vec::new(),
+        }),
     }
 }

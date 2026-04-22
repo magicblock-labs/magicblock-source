@@ -75,9 +75,13 @@ async fn main() -> anyhow::Result<()> {
                 ctx.artifacts.cleanup_success()?;
                 info!(scenario = scenario.as_str(), "scenario passed");
             }
-            Err(error) => {
+            Err(failure) => {
+                if !failure.clients.is_empty() {
+                    ctx.artifacts
+                        .write_client_updates(*scenario, &failure.clients)?;
+                }
                 ctx.artifacts.persist_failure()?;
-                return Err(error);
+                return Err(failure.error);
             }
         }
     }

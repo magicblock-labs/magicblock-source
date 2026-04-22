@@ -1,9 +1,11 @@
 use std::sync::{Arc, Mutex};
 
+use serde::Serialize;
+
 use crate::layout::ServiceInstance;
 
 #[allow(dead_code)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ObservedUpdate {
     pub client_id: usize,
     pub service: ServiceInstance,
