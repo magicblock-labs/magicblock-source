@@ -2,9 +2,13 @@ use {
     crate::{
         initial_account_backfill::{
             INITIAL_BACKFILL_INITIAL_BACKOFF_MS, INITIAL_BACKFILL_MAX_ATTEMPTS,
-            INITIAL_BACKFILL_MAX_BACKOFF_MS, INITIAL_BACKFILL_MAX_RPC_KEYS_PER_REQUEST,
+            INITIAL_BACKFILL_MAX_BACKOFF_MS,
+            INITIAL_BACKFILL_MAX_RPC_KEYS_PER_REQUEST,
         },
-        metrics::{INITIAL_BACKFILL_RPC_ATTEMPTS_TOTAL, INITIAL_BACKFILL_RPC_FAILURES_TOTAL},
+        metrics::{
+            INITIAL_BACKFILL_RPC_ATTEMPTS_TOTAL,
+            INITIAL_BACKFILL_RPC_FAILURES_TOTAL,
+        },
         wire::UpdateAccountEvent,
     },
     log::*,
@@ -52,7 +56,10 @@ async fn fetch_account_events_for_chunk(
         );
 
         match client
-            .get_multiple_accounts_with_commitment(&keys, CommitmentConfig::confirmed())
+            .get_multiple_accounts_with_commitment(
+                &keys,
+                CommitmentConfig::confirmed(),
+            )
             .await
         {
             Ok(response) => {
@@ -83,10 +90,14 @@ async fn fetch_account_events_for_chunk(
                     .iter()
                     .zip(response.value.into_iter())
                     .map(|(pubkey, maybe_account)| match maybe_account {
-                        Some(account) => {
-                            map_existing_account(account, response.context.slot, *pubkey)
+                        Some(account) => map_existing_account(
+                            account,
+                            response.context.slot,
+                            *pubkey,
+                        ),
+                        None => {
+                            map_missing_account(response.context.slot, *pubkey)
                         }
-                        None => map_missing_account(response.context.slot, *pubkey),
                     })
                     .collect());
             }
@@ -105,7 +116,8 @@ async fn fetch_account_events_for_chunk(
 
                 if attempt < INITIAL_BACKFILL_MAX_ATTEMPTS {
                     sleep(Duration::from_millis(backoff_ms)).await;
-                    backoff_ms = (backoff_ms * 2).min(INITIAL_BACKFILL_MAX_BACKOFF_MS);
+                    backoff_ms =
+                        (backoff_ms * 2).min(INITIAL_BACKFILL_MAX_BACKOFF_MS);
                 }
             }
         }
@@ -114,7 +126,8 @@ async fn fetch_account_events_for_chunk(
     Err(io::Error::other(last_error.unwrap()))
 }
 
-pub(crate) const SYSTEM_PROGRAM_ID: Pubkey = pubkey!("11111111111111111111111111111111");
+pub(crate) const SYSTEM_PROGRAM_ID: Pubkey =
+    pubkey!("11111111111111111111111111111111");
 
 pub(crate) fn map_existing_account(
     account: Account,
@@ -137,7 +150,10 @@ pub(crate) fn map_existing_account(
     }
 }
 
-pub(crate) fn map_missing_account(slot: u64, pubkey: [u8; 32]) -> UpdateAccountEvent {
+pub(crate) fn map_missing_account(
+    slot: u64,
+    pubkey: [u8; 32],
+) -> UpdateAccountEvent {
     UpdateAccountEvent {
         slot,
         pubkey: pubkey.to_vec(),

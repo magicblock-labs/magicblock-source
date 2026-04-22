@@ -44,10 +44,15 @@ impl Publisher {
         }
     }
 
-    pub fn update_account(&self, ev: UpdateAccountEvent, topic: &str) -> Result<(), KafkaError> {
+    pub fn update_account(
+        &self,
+        ev: UpdateAccountEvent,
+        topic: &str,
+    ) -> Result<(), KafkaError> {
         let log_pubkey = Pubkey::try_from(ev.pubkey.as_slice()).ok();
         let (key, buf) = Self::encode_account_update(ev);
-        let record = BaseRecord::<Vec<u8>, _>::to(topic).key(&key).payload(&buf);
+        let record =
+            BaseRecord::<Vec<u8>, _>::to(topic).key(&key).payload(&buf);
         let result = self.producer.send(record).map(|_| ()).map_err(|(e, _)| e);
         match &result {
             Ok(()) => match log_pubkey {
@@ -69,7 +74,11 @@ impl Publisher {
             },
         }
         UPLOAD_ACCOUNTS_TOTAL
-            .with_label_values(&[if result.is_ok() { "success" } else { "failed" }])
+            .with_label_values(&[if result.is_ok() {
+                "success"
+            } else {
+                "failed"
+            }])
             .inc();
         result
     }
@@ -97,7 +106,9 @@ impl Drop for Publisher {
 #[cfg(test)]
 mod tests {
     use super::Publisher;
-    use crate::{MessageWrapper, UpdateAccountEvent, message_wrapper::EventMessage};
+    use crate::{
+        MessageWrapper, UpdateAccountEvent, message_wrapper::EventMessage,
+    };
     use prost::Message;
 
     fn sample_event() -> UpdateAccountEvent {
@@ -136,7 +147,9 @@ mod tests {
         let wrapper = MessageWrapper::decode(payload.as_slice()).unwrap();
 
         match wrapper.event_message {
-            Some(EventMessage::Account(account)) => assert_eq!(*account, expected),
+            Some(EventMessage::Account(account)) => {
+                assert_eq!(*account, expected)
+            }
             other => panic!("unexpected wrapper payload: {other:?}"),
         }
     }

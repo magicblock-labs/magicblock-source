@@ -1,9 +1,13 @@
 use {
     crate::{
-        account_update_publisher::{AccountUpdatePublishOutcome, publish_backfill_account_update},
+        account_update_publisher::{
+            AccountUpdatePublishOutcome, publish_backfill_account_update,
+        },
         metrics::{
-            INITIAL_BACKFILL_IN_FLIGHT, INITIAL_BACKFILL_PUBKEYS_ENQUEUED_TOTAL,
-            INITIAL_BACKFILL_REQUESTS_ENQUEUED_TOTAL, INITIAL_BACKFILL_RPC_FAILURES_TOTAL,
+            INITIAL_BACKFILL_IN_FLIGHT,
+            INITIAL_BACKFILL_PUBKEYS_ENQUEUED_TOTAL,
+            INITIAL_BACKFILL_REQUESTS_ENQUEUED_TOTAL,
+            INITIAL_BACKFILL_RPC_FAILURES_TOTAL,
             INITIAL_BACKFILL_SNAPSHOTS_TOTAL,
         },
         publisher::Publisher,
@@ -50,7 +54,10 @@ impl InitialAccountBackfill {
             publisher: Some(publisher),
             update_account_topic,
             subscriptions,
-            client: RpcClient::new_with_commitment(local_rpc_url, CommitmentConfig::confirmed()),
+            client: RpcClient::new_with_commitment(
+                local_rpc_url,
+                CommitmentConfig::confirmed(),
+            ),
         });
         let handle = InitialAccountBackfillHandle {
             inner: inner.clone(),
@@ -85,7 +92,10 @@ impl InitialAccountBackfill {
             publisher: None,
             update_account_topic: Arc::new(String::new()),
             subscriptions: AccountSubscriptions::new(),
-            client: RpcClient::new_with_commitment(String::new(), CommitmentConfig::confirmed()),
+            client: RpcClient::new_with_commitment(
+                String::new(),
+                CommitmentConfig::confirmed(),
+            ),
         });
         Self {
             handle: InitialAccountBackfillHandle { inner },
@@ -137,7 +147,8 @@ impl InitialAccountBackfillHandle {
                 INITIAL_BACKFILL_PUBKEYS_ENQUEUED_TOTAL
                     .with_label_values(&["accepted"])
                     .inc_by(request_pubkey_count as u64);
-                INITIAL_BACKFILL_IN_FLIGHT.set(self.inner.in_flight.len() as i64);
+                INITIAL_BACKFILL_IN_FLIGHT
+                    .set(self.inner.in_flight.len() as i64);
                 info!(
                     "Enqueued initial account backfill request for {} pubkeys, in_flight={}",
                     request_pubkey_count,
@@ -247,7 +258,8 @@ struct InitialAccountBackfillInner {
 
 impl InitialAccountBackfillInner {
     async fn process_request(&self, pubkeys: &[[u8; 32]]) {
-        match rpc::fetch_account_events_for_request(&self.client, pubkeys).await {
+        match rpc::fetch_account_events_for_request(&self.client, pubkeys).await
+        {
             Ok(events) => {
                 info!(
                     "Initial account backfill RPC request succeeded for {} pubkeys",
@@ -278,7 +290,9 @@ impl InitialAccountBackfillInner {
                 INITIAL_BACKFILL_SNAPSHOTS_TOTAL
                     .with_label_values(&["publish_failed"])
                     .inc();
-                error!("Failed to publish initial account backfill snapshot: {error:?}");
+                error!(
+                    "Failed to publish initial account backfill snapshot: {error:?}"
+                );
             }
         }
     }
@@ -293,7 +307,8 @@ impl InitialAccountBackfillInner {
     fn complete_backfill_event(
         &self,
         event: UpdateAccountEvent,
-    ) -> agave_geyser_plugin_interface::geyser_plugin_interface::Result<()> {
+    ) -> agave_geyser_plugin_interface::geyser_plugin_interface::Result<()>
+    {
         let pubkey = match <[u8; 32]>::try_from(event.pubkey.as_slice()) {
             Ok(pubkey) => pubkey,
             Err(_) => {
@@ -325,9 +340,15 @@ impl InitialAccountBackfillInner {
         )?;
         Self::record_snapshot(match outcome {
             AccountUpdatePublishOutcome::Published => "published",
-            AccountUpdatePublishOutcome::SkippedStartupReplay => "skipped_startup_replay",
-            AccountUpdatePublishOutcome::SkippedUnsubscribed => "skipped_unsubscribed",
-            AccountUpdatePublishOutcome::SkippedLiveUpdateWon => "suppressed_live_seen",
+            AccountUpdatePublishOutcome::SkippedStartupReplay => {
+                "skipped_startup_replay"
+            }
+            AccountUpdatePublishOutcome::SkippedUnsubscribed => {
+                "skipped_unsubscribed"
+            }
+            AccountUpdatePublishOutcome::SkippedLiveUpdateWon => {
+                "suppressed_live_seen"
+            }
         });
         if matches!(outcome, AccountUpdatePublishOutcome::Published) {
             info!(
@@ -352,8 +373,8 @@ impl InitialAccountBackfillInner {
 #[cfg(test)]
 mod tests {
     use {
-        super::*, crate::server::subscriptions::AccountSubscriptions, solana_account::Account,
-        tokio::sync::mpsc,
+        super::*, crate::server::subscriptions::AccountSubscriptions,
+        solana_account::Account, tokio::sync::mpsc,
     };
 
     fn pk(byte: u8) -> [u8; 32] {
@@ -471,7 +492,8 @@ mod tests {
         let _ = handle.enqueue(vec![pubkey]);
         handle.mark_live_update_seen(&pubkey);
 
-        let result = inner.complete_backfill_event(rpc::map_missing_account(1, pubkey));
+        let result =
+            inner.complete_backfill_event(rpc::map_missing_account(1, pubkey));
 
         assert!(result.is_ok());
         assert!(!inner.in_flight.contains_key(&pubkey));

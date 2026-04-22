@@ -18,7 +18,9 @@ use {
     },
     reqwest::Url,
     serde::Deserialize,
-    std::{collections::BTreeMap, fs::File, io::Read, net::SocketAddr, path::Path},
+    std::{
+        collections::BTreeMap, fs::File, io::Read, net::SocketAddr, path::Path,
+    },
 };
 
 /// Plugin config.
@@ -114,8 +116,9 @@ impl Config {
         let mut file = File::open(config_path)?;
         let mut contents = String::new();
         file.read_to_string(&mut contents)?;
-        let mut this: Self = toml::from_str(&contents)
-            .map_err(|e| GeyserPluginError::ConfigFileReadError { msg: e.to_string() })?;
+        let mut this: Self = toml::from_str(&contents).map_err(|e| {
+            GeyserPluginError::ConfigFileReadError { msg: e.to_string() }
+        })?;
         this.fill_defaults();
         this.validate()?;
         Ok(this)
@@ -137,7 +140,8 @@ impl Config {
     fn validate(&self) -> PluginResult<()> {
         if self.kafka.bootstrap_servers.trim().is_empty() {
             return Err(GeyserPluginError::ConfigFileReadError {
-                msg: "missing required config field `kafka.bootstrap_servers`".to_owned(),
+                msg: "missing required config field `kafka.bootstrap_servers`"
+                    .to_owned(),
             });
         }
 
@@ -149,7 +153,8 @@ impl Config {
 
         if self.plugin.local_rpc_url.trim().is_empty() {
             return Err(GeyserPluginError::ConfigFileReadError {
-                msg: "missing required config field `plugin.local_rpc_url`".to_owned(),
+                msg: "missing required config field `plugin.local_rpc_url`"
+                    .to_owned(),
             });
         }
 
@@ -163,14 +168,17 @@ impl Config {
             let trimmed = url.trim();
             if trimmed.is_empty() {
                 return Err(GeyserPluginError::ConfigFileReadError {
-                    msg: "invalid config field `ksql.url`: URL must not be empty".to_owned(),
+                    msg:
+                        "invalid config field `ksql.url`: URL must not be empty"
+                            .to_owned(),
                 });
             }
 
-            let parsed =
-                Url::parse(trimmed).map_err(|error| GeyserPluginError::ConfigFileReadError {
+            let parsed = Url::parse(trimmed).map_err(|error| {
+                GeyserPluginError::ConfigFileReadError {
                     msg: format!("invalid config field `ksql.url`: {error}"),
-                })?;
+                }
+            })?;
 
             match parsed.scheme() {
                 "http" | "https" => {}
@@ -185,7 +193,8 @@ impl Config {
 
             if !parsed.has_host() {
                 return Err(GeyserPluginError::ConfigFileReadError {
-                    msg: "invalid config field `ksql.url`: host is required".to_owned(),
+                    msg: "invalid config field `ksql.url`: host is required"
+                        .to_owned(),
                 });
             }
 
@@ -205,7 +214,8 @@ mod tests {
     use super::Config;
 
     fn parse_config(toml: &str) -> Result<Config, String> {
-        let mut config: Config = toml::from_str(toml).map_err(|error| error.to_string())?;
+        let mut config: Config =
+            toml::from_str(toml).map_err(|error| error.to_string())?;
         config.fill_defaults();
         config.validate().map_err(|error| format!("{error:?}"))?;
         Ok(config)
@@ -287,7 +297,9 @@ admin = "127.0.0.1:8080"
         )
         .unwrap_err();
 
-        assert!(error.contains("missing required config field `kafka.bootstrap_servers`"));
+        assert!(error.contains(
+            "missing required config field `kafka.bootstrap_servers`"
+        ));
     }
 
     #[test]
@@ -461,7 +473,9 @@ admin = "127.0.0.1:8080"
         )
         .unwrap_err();
 
-        assert!(error.contains("empty host") || error.contains("host is required"));
+        assert!(
+            error.contains("empty host") || error.contains("host is required")
+        );
     }
 
     #[test]

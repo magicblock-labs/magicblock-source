@@ -1,7 +1,8 @@
 use {
     crate::{
-        initial_account_backfill::InitialAccountBackfillHandle, publisher::Publisher,
-        server::subscriptions::AccountSubscriptions, wire::UpdateAccountEvent,
+        initial_account_backfill::InitialAccountBackfillHandle,
+        publisher::Publisher, server::subscriptions::AccountSubscriptions,
+        wire::UpdateAccountEvent,
     },
     agave_geyser_plugin_interface::geyser_plugin_interface::{
         GeyserPluginError as PluginError, Result as PluginResult,
@@ -50,7 +51,8 @@ pub fn publish_backfill_account_update(
     live_update_seen: bool,
     event: UpdateAccountEvent,
 ) -> PluginResult<AccountUpdatePublishOutcome> {
-    let decision = should_publish_backfill_account(subs, pubkey, live_update_seen);
+    let decision =
+        should_publish_backfill_account(subs, pubkey, live_update_seen);
     match decision {
         AccountUpdatePublishOutcome::Published => {
             publish_raw_account_update(publisher, topic, event)?;
@@ -117,7 +119,10 @@ fn should_publish_backfill_account(
     AccountUpdatePublishOutcome::Published
 }
 
-fn should_publish_subscribed_account(subs: &AccountSubscriptions, pubkey: &[u8]) -> bool {
+fn should_publish_subscribed_account(
+    subs: &AccountSubscriptions,
+    pubkey: &[u8],
+) -> bool {
     match <&[u8; 32]>::try_from(pubkey) {
         Ok(key) => subs.contains_sync(key),
         Err(_) => false,
@@ -145,7 +150,9 @@ mod tests {
         AccountUpdatePublishOutcome, should_publish_backfill_account,
         should_publish_confirmed_account,
     };
-    use crate::{server::subscriptions::AccountSubscriptions, wire::UpdateAccountEvent};
+    use crate::{
+        server::subscriptions::AccountSubscriptions, wire::UpdateAccountEvent,
+    };
 
     fn sample_event(is_startup: bool) -> UpdateAccountEvent {
         UpdateAccountEvent {
@@ -167,7 +174,10 @@ mod tests {
     #[test]
     fn test_confirmed_startup_replay_updates_are_suppressed() {
         assert!(matches!(
-            should_publish_confirmed_account(&AccountSubscriptions::new(), &sample_event(true)),
+            should_publish_confirmed_account(
+                &AccountSubscriptions::new(),
+                &sample_event(true)
+            ),
             AccountUpdatePublishOutcome::SkippedStartupReplay
         ));
     }
@@ -175,7 +185,11 @@ mod tests {
     #[test]
     fn test_backfill_snapshots_are_suppressed_after_live_updates() {
         assert!(matches!(
-            should_publish_backfill_account(&AccountSubscriptions::new(), [7; 32], true),
+            should_publish_backfill_account(
+                &AccountSubscriptions::new(),
+                [7; 32],
+                true
+            ),
             AccountUpdatePublishOutcome::SkippedLiveUpdateWon
         ));
     }

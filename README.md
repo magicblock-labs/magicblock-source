@@ -15,6 +15,18 @@ This repo contains the MagicBlock account update pipeline:
 - `kafka-setup/`: minimal Kafka/ksqlDB local environment
 - `Makefile`: top-level operator entrypoint
 
+## CI Contract
+
+The repository-level CI in `.github/workflows/test.yml` runs the
+same workspace checks on every push and pull request:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --no-deps -- -D warnings
+cargo build --workspace
+cargo test --workspace -- --test-threads=16
+```
+
 ## Common Root Workflows
 
 - `make build`

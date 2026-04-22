@@ -30,8 +30,9 @@ use {
         },
     },
     agave_geyser_plugin_interface::geyser_plugin_interface::{
-        GeyserPlugin, GeyserPluginError as PluginError, ReplicaAccountInfoVersions,
-        Result as PluginResult, SlotStatus as PluginSlotStatus,
+        GeyserPlugin, GeyserPluginError as PluginError,
+        ReplicaAccountInfoVersions, Result as PluginResult,
+        SlotStatus as PluginSlotStatus,
     },
     log::{error, info, warn},
     rdkafka::util::get_rdkafka_version,
@@ -96,15 +97,17 @@ impl GeyserPlugin for KafkaPlugin {
         for (key, value) in &config.kafka.client {
             producer_config.set(key, value);
         }
-        producer_config.set("bootstrap.servers", &config.kafka.bootstrap_servers);
-        let producer = rdkafka::producer::ThreadedProducer::from_config_and_context(
-            &producer_config,
-            StatsThreadedProducerContext,
-        )
-        .map_err(|error| {
-            error!("Failed to create kafka producer: {error:?}");
-            PluginError::Custom(Box::new(error))
-        })?;
+        producer_config
+            .set("bootstrap.servers", &config.kafka.bootstrap_servers);
+        let producer =
+            rdkafka::producer::ThreadedProducer::from_config_and_context(
+                &producer_config,
+                StatsThreadedProducerContext,
+            )
+            .map_err(|error| {
+                error!("Failed to create kafka producer: {error:?}");
+                PluginError::Custom(Box::new(error))
+            })?;
         let publisher = Arc::new(Publisher::new(
             producer,
             Duration::from_millis(config.plugin.shutdown_timeout_ms),
@@ -195,7 +198,9 @@ impl KafkaPlugin {
         Default::default()
     }
 
-    fn lock_confirmed_accounts(&self) -> PluginResult<MutexGuard<'_, ConfirmedAccounts>> {
+    fn lock_confirmed_accounts(
+        &self,
+    ) -> PluginResult<MutexGuard<'_, ConfirmedAccounts>> {
         self.confirmed_accounts.lock().map_err(|error| {
             PluginError::Custom(Box::new(std::io::Error::other(format!(
                 "confirmed_accounts mutex poisoned: {error}"
@@ -357,8 +362,10 @@ mod tests {
     use {
         super::{KafkaPlugin, restore_pubkeys_in_chunks},
         crate::{
-            config::Config, initial_account_backfill::InitialAccountBackfillHandle,
-            ksql::INIT_TRACKING_RESTORE_CHUNK_SIZE, server::subscriptions::AccountSubscriptions,
+            config::Config,
+            initial_account_backfill::InitialAccountBackfillHandle,
+            ksql::INIT_TRACKING_RESTORE_CHUNK_SIZE,
+            server::subscriptions::AccountSubscriptions,
         },
     };
 
@@ -373,8 +380,11 @@ mod tests {
         let initial_account_backfill =
             crate::initial_account_backfill::InitialAccountBackfill::default();
 
-        let result =
-            KafkaPlugin::restore_tracking_from_ksql(&config, &subs, &initial_account_backfill);
+        let result = KafkaPlugin::restore_tracking_from_ksql(
+            &config,
+            &subs,
+            &initial_account_backfill,
+        );
 
         assert!(result.is_ok());
         assert!(!subs.contains_sync(&pk(1)));
@@ -385,9 +395,12 @@ mod tests {
         let subs = AccountSubscriptions::new();
         let test_handle = InitialAccountBackfillHandle::new_test(8);
 
-        let summary =
-            restore_pubkeys_in_chunks(&subs, &test_handle, vec![pk(1), pk(1), pk(2), pk(2), pk(3)])
-                .unwrap();
+        let summary = restore_pubkeys_in_chunks(
+            &subs,
+            &test_handle,
+            vec![pk(1), pk(1), pk(2), pk(2), pk(3)],
+        )
+        .unwrap();
 
         assert_eq!(summary.deduplicated_count, 3);
         assert_eq!(summary.accepted_count, 3);
@@ -411,14 +424,18 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let summary = restore_pubkeys_in_chunks(&subs, &test_handle, pubkeys).unwrap();
+        let summary =
+            restore_pubkeys_in_chunks(&subs, &test_handle, pubkeys).unwrap();
 
         assert_eq!(
             summary.deduplicated_count,
             INIT_TRACKING_RESTORE_CHUNK_SIZE + 1
         );
         assert_eq!(summary.chunk_count, 2);
-        assert_eq!(summary.accepted_count, INIT_TRACKING_RESTORE_CHUNK_SIZE + 1);
+        assert_eq!(
+            summary.accepted_count,
+            INIT_TRACKING_RESTORE_CHUNK_SIZE + 1
+        );
     }
 
     #[test]
@@ -427,7 +444,8 @@ mod tests {
         let test_handle = InitialAccountBackfillHandle::new_test(1);
         test_handle.prefill_queue_for_test(vec![pk(9)]);
 
-        let error = restore_pubkeys_in_chunks(&subs, &test_handle, vec![pk(7), pk(8)]);
+        let error =
+            restore_pubkeys_in_chunks(&subs, &test_handle, vec![pk(7), pk(8)]);
 
         assert!(error.is_err());
         assert_eq!(subs.needs_backfill_count(), 2);

@@ -104,7 +104,9 @@ impl ConfirmedAccounts {
     ) -> SlotTransitionResult {
         self.update_highest_observed_slot(slot);
 
-        if self.dead_slots.contains(&slot) && !matches!(status, InternalSlotStatus::Dead) {
+        if self.dead_slots.contains(&slot)
+            && !matches!(status, InternalSlotStatus::Dead)
+        {
             return SlotTransitionResult::default();
         }
 
@@ -273,7 +275,8 @@ impl ConfirmedAccounts {
             return Vec::new();
         }
 
-        let cutoff = self.highest_observed_slot - STALE_UNCONFIRMED_SLOT_RETENTION;
+        let cutoff =
+            self.highest_observed_slot - STALE_UNCONFIRMED_SLOT_RETENTION;
         let victims: Vec<u64> = self
             .slots
             .iter()
@@ -358,7 +361,11 @@ mod tests {
         slots
     }
 
-    fn account_event(slot: u64, pubkey_byte: u8, write_version: u64) -> UpdateAccountEvent {
+    fn account_event(
+        slot: u64,
+        pubkey_byte: u8,
+        write_version: u64,
+    ) -> UpdateAccountEvent {
         UpdateAccountEvent {
             slot,
             pubkey: vec![pubkey_byte; 32],
@@ -383,11 +390,17 @@ mod tests {
         confirmed.record_account(account_event(10, 1, 2));
 
         assert_eq!(confirmed.pending_count_for(10), 1);
-        let result = confirmed.record_slot_status(10, None, InternalSlotStatus::Confirmed);
+        let result = confirmed.record_slot_status(
+            10,
+            None,
+            InternalSlotStatus::Confirmed,
+        );
         assert_eq!(result.newly_confirmed_slots, vec![10]);
         assert_eq!(result.confirmed_updates.len(), 1);
         assert_eq!(
-            sorted_slots(result.confirmed_updates.iter().map(|event| event.slot)),
+            sorted_slots(
+                result.confirmed_updates.iter().map(|event| event.slot)
+            ),
             vec![10]
         );
         assert!(result.dead_slots_cleaned.is_empty());
@@ -402,13 +415,23 @@ mod tests {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(11, 2, 1));
 
-        let first = confirmed.record_slot_status(11, None, InternalSlotStatus::Confirmed);
-        let second = confirmed.record_slot_status(11, None, InternalSlotStatus::Confirmed);
+        let first = confirmed.record_slot_status(
+            11,
+            None,
+            InternalSlotStatus::Confirmed,
+        );
+        let second = confirmed.record_slot_status(
+            11,
+            None,
+            InternalSlotStatus::Confirmed,
+        );
 
         assert_eq!(first.newly_confirmed_slots, vec![11]);
         assert_eq!(first.confirmed_updates.len(), 1);
         assert_eq!(
-            sorted_slots(first.confirmed_updates.iter().map(|event| event.slot)),
+            sorted_slots(
+                first.confirmed_updates.iter().map(|event| event.slot)
+            ),
             vec![11]
         );
         assert!(first.dead_slots_cleaned.is_empty());
@@ -427,12 +450,15 @@ mod tests {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(12, 3, 1));
 
-        let result = confirmed.record_slot_status(12, None, InternalSlotStatus::Rooted);
+        let result =
+            confirmed.record_slot_status(12, None, InternalSlotStatus::Rooted);
 
         assert_eq!(result.newly_confirmed_slots, vec![12]);
         assert_eq!(result.confirmed_updates.len(), 1);
         assert_eq!(
-            sorted_slots(result.confirmed_updates.iter().map(|event| event.slot)),
+            sorted_slots(
+                result.confirmed_updates.iter().map(|event| event.slot)
+            ),
             vec![12]
         );
         assert!(result.dead_slots_cleaned.is_empty());
@@ -447,15 +473,29 @@ mod tests {
         confirmed.record_account(account_event(20, 4, 1));
         confirmed.record_account(account_event(21, 5, 1));
         confirmed.record_account(account_event(22, 6, 1));
-        confirmed.record_slot_status(21, Some(20), InternalSlotStatus::Processed);
-        confirmed.record_slot_status(22, Some(21), InternalSlotStatus::Processed);
+        confirmed.record_slot_status(
+            21,
+            Some(20),
+            InternalSlotStatus::Processed,
+        );
+        confirmed.record_slot_status(
+            22,
+            Some(21),
+            InternalSlotStatus::Processed,
+        );
 
-        let result = confirmed.record_slot_status(22, None, InternalSlotStatus::Confirmed);
+        let result = confirmed.record_slot_status(
+            22,
+            None,
+            InternalSlotStatus::Confirmed,
+        );
 
         assert_eq!(result.newly_confirmed_slots, vec![22, 21, 20]);
         assert_eq!(result.confirmed_updates.len(), 3);
         assert_eq!(
-            sorted_slots(result.confirmed_updates.iter().map(|event| event.slot)),
+            sorted_slots(
+                result.confirmed_updates.iter().map(|event| event.slot)
+            ),
             vec![20, 21, 22]
         );
         assert!(result.dead_slots_cleaned.is_empty());
@@ -473,12 +513,18 @@ mod tests {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(30, 7, 1));
 
-        let result = confirmed.record_slot_status(30, None, InternalSlotStatus::Confirmed);
+        let result = confirmed.record_slot_status(
+            30,
+            None,
+            InternalSlotStatus::Confirmed,
+        );
 
         assert_eq!(result.newly_confirmed_slots, vec![30]);
         assert_eq!(result.confirmed_updates.len(), 1);
         assert_eq!(
-            sorted_slots(result.confirmed_updates.iter().map(|event| event.slot)),
+            sorted_slots(
+                result.confirmed_updates.iter().map(|event| event.slot)
+            ),
             vec![30]
         );
         assert!(result.dead_slots_cleaned.is_empty());
@@ -492,14 +538,24 @@ mod tests {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(40, 8, 1));
         confirmed.record_account(account_event(41, 9, 1));
-        confirmed.record_slot_status(41, Some(40), InternalSlotStatus::Processed);
+        confirmed.record_slot_status(
+            41,
+            Some(40),
+            InternalSlotStatus::Processed,
+        );
 
-        let result = confirmed.record_slot_status(41, None, InternalSlotStatus::Confirmed);
+        let result = confirmed.record_slot_status(
+            41,
+            None,
+            InternalSlotStatus::Confirmed,
+        );
 
         assert_eq!(result.newly_confirmed_slots, vec![41, 40]);
         assert_eq!(result.confirmed_updates.len(), 2);
         assert_eq!(
-            sorted_slots(result.confirmed_updates.iter().map(|event| event.slot)),
+            sorted_slots(
+                result.confirmed_updates.iter().map(|event| event.slot)
+            ),
             vec![40, 41]
         );
         assert!(result.dead_slots_cleaned.is_empty());
@@ -515,7 +571,8 @@ mod tests {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(50, 10, 1));
 
-        let result = confirmed.record_slot_status(50, None, InternalSlotStatus::Dead);
+        let result =
+            confirmed.record_slot_status(50, None, InternalSlotStatus::Dead);
 
         assert_eq!(result.dead_slots_cleaned, vec![50]);
         assert!(result.confirmed_updates.is_empty());
@@ -531,9 +588,14 @@ mod tests {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(60, 11, 1));
         confirmed.record_account(account_event(61, 12, 1));
-        confirmed.record_slot_status(61, Some(60), InternalSlotStatus::Processed);
+        confirmed.record_slot_status(
+            61,
+            Some(60),
+            InternalSlotStatus::Processed,
+        );
 
-        let result = confirmed.record_slot_status(60, None, InternalSlotStatus::Dead);
+        let result =
+            confirmed.record_slot_status(60, None, InternalSlotStatus::Dead);
 
         assert_eq!(sorted_slots(result.dead_slots_cleaned), vec![60, 61]);
         assert!(result.confirmed_updates.is_empty());
@@ -553,7 +615,11 @@ mod tests {
         confirmed.record_account(account_event(70, 13, 1));
         confirmed.record_slot_status(70, None, InternalSlotStatus::Dead);
 
-        let result = confirmed.record_slot_status(70, None, InternalSlotStatus::Confirmed);
+        let result = confirmed.record_slot_status(
+            70,
+            None,
+            InternalSlotStatus::Confirmed,
+        );
 
         assert!(result.confirmed_updates.is_empty());
         assert!(result.newly_confirmed_slots.is_empty());
@@ -569,8 +635,13 @@ mod tests {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(80, 14, 1));
 
-        let _ = confirmed.record_slot_status(80, None, InternalSlotStatus::Confirmed);
-        let result = confirmed.record_slot_status(80, None, InternalSlotStatus::Rooted);
+        let _ = confirmed.record_slot_status(
+            80,
+            None,
+            InternalSlotStatus::Confirmed,
+        );
+        let result =
+            confirmed.record_slot_status(80, None, InternalSlotStatus::Rooted);
 
         assert!(result.confirmed_updates.is_empty());
         assert!(result.newly_confirmed_slots.is_empty());
@@ -604,7 +675,11 @@ mod tests {
     fn test_stale_fallback_does_not_evict_confirmed_slots() {
         let mut confirmed = ConfirmedAccounts::new();
         confirmed.record_account(account_event(2, 16, 1));
-        let _ = confirmed.record_slot_status(2, None, InternalSlotStatus::Confirmed);
+        let _ = confirmed.record_slot_status(
+            2,
+            None,
+            InternalSlotStatus::Confirmed,
+        );
 
         let result = confirmed.record_slot_status(
             STALE_UNCONFIRMED_SLOT_RETENTION + 10,

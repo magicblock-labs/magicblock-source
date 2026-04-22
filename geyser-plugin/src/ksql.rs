@@ -16,12 +16,13 @@ pub(crate) struct KsqlPubkeyRestoreClient {
 
 impl KsqlPubkeyRestoreClient {
     pub(crate) fn new(base_url: &str, table: &str) -> io::Result<Self> {
-        let parsed = Url::parse(base_url)
-            .map_err(|error| io::Error::other(format!("invalid ksql base URL: {error}")))?;
+        let parsed = Url::parse(base_url).map_err(|error| {
+            io::Error::other(format!("invalid ksql base URL: {error}"))
+        })?;
         let normalized = parsed.as_str().trim_end_matches('/').to_owned();
-        let client = Client::builder()
-            .build()
-            .map_err(|error| io::Error::other(format!("failed to build ksql client: {error}")))?;
+        let client = Client::builder().build().map_err(|error| {
+            io::Error::other(format!("failed to build ksql client: {error}"))
+        })?;
 
         Ok(Self {
             client,
@@ -46,9 +47,13 @@ impl KsqlPubkeyRestoreClient {
                 "sql": sql,
             }))
             .send()
-            .map_err(|error| io::Error::other(format!("failed to query ksqlDB: {error}")))?
+            .map_err(|error| {
+                io::Error::other(format!("failed to query ksqlDB: {error}"))
+            })?
             .error_for_status()
-            .map_err(|error| io::Error::other(format!("ksqlDB query failed: {error}")))?;
+            .map_err(|error| {
+                io::Error::other(format!("ksqlDB query failed: {error}"))
+            })?;
 
         let reader = BufReader::new(response);
         let pubkeys = parse_pubkeys_stream(reader)?;
@@ -60,7 +65,9 @@ impl KsqlPubkeyRestoreClient {
     }
 }
 
-pub(crate) fn parse_pubkeys_stream(reader: impl BufRead) -> io::Result<Vec<[u8; 32]>> {
+pub(crate) fn parse_pubkeys_stream(
+    reader: impl BufRead,
+) -> io::Result<Vec<[u8; 32]>> {
     let mut pubkeys = Vec::new();
 
     for line_result in reader.lines() {
@@ -70,7 +77,9 @@ pub(crate) fn parse_pubkeys_stream(reader: impl BufRead) -> io::Result<Vec<[u8; 
             continue;
         }
         let value: Value = serde_json::from_str(line).map_err(|error| {
-            io::Error::other(format!("invalid ksql response line `{line}`: {error}"))
+            io::Error::other(format!(
+                "invalid ksql response line `{line}`: {error}"
+            ))
         })?;
 
         match value {
@@ -106,14 +115,17 @@ pub(crate) fn parse_pubkeys_stream(reader: impl BufRead) -> io::Result<Vec<[u8; 
                 let decoded = base64::engine::general_purpose::STANDARD
                     .decode(encoded)
                     .map_err(|error| {
-                        io::Error::other(format!("invalid PUBKEY base64 value: {error}"))
+                        io::Error::other(format!(
+                            "invalid PUBKEY base64 value: {error}"
+                        ))
                     })?;
-                let pubkey: [u8; 32] = decoded.try_into().map_err(|bytes: Vec<u8>| {
-                    io::Error::other(format!(
-                        "expected 32 decoded PUBKEY bytes, got {}",
-                        bytes.len()
-                    ))
-                })?;
+                let pubkey: [u8; 32] =
+                    decoded.try_into().map_err(|bytes: Vec<u8>| {
+                        io::Error::other(format!(
+                            "expected 32 decoded PUBKEY bytes, got {}",
+                            bytes.len()
+                        ))
+                    })?;
                 pubkeys.push(pubkey);
             }
             _ => {
@@ -161,9 +173,11 @@ mod tests {
 
     #[test]
     fn test_rejects_ksql_error_rows() {
-        let error = parse_pubkeys_stream("{\"@type\":\"error\",\"message\":\"boom\"}\n".as_bytes())
-            .unwrap_err()
-            .to_string();
+        let error = parse_pubkeys_stream(
+            "{\"@type\":\"error\",\"message\":\"boom\"}\n".as_bytes(),
+        )
+        .unwrap_err()
+        .to_string();
 
         assert!(error.contains("ksql error response"));
     }

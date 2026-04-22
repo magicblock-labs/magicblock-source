@@ -21,7 +21,7 @@ CLIENT_REST ?= http://127.0.0.1:3030
 help:
 	@echo "Available targets:"
 	@echo "  build                         - Build all Rust workspace packages"
-	@echo "  check                         - Build the whole workspace"
+	@echo "  check                         - Run workspace fmt, clippy, build, and test"
 	@echo "  kafka-up                      - Start the Kafka/ksqlDB stack"
 	@echo "  kafka-down                    - Stop and remove the Kafka/ksqlDB stack"
 	@echo "  kafka-ready                   - Start the stack and initialize stream/table/schema"
@@ -41,7 +41,10 @@ build:
 	cargo build -p solana-accountsdb-plugin-kafka
 
 check:
+	cargo fmt --all -- --check
+	cargo clippy --workspace --all-targets --no-deps -- -D warnings
 	cargo build --workspace
+	cargo test --workspace -- --test-threads=16
 
 kafka-up:
 	$(MAKE) -C kafka-setup up
