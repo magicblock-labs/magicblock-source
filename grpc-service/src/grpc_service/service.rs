@@ -18,9 +18,8 @@ use tracing::{debug, info, warn};
 
 use super::convert::to_subscribe_update;
 use super::dispatcher::{DispatcherHandle, TargetedSendResult};
-use super::init_subs::InitSubsClient;
 use crate::domain::{AccountEvent, PubkeyFilter};
-use crate::ksql::KsqlAccountSnapshotClient;
+use crate::traits::{SnapshotStore, ValidatorSubscriptions};
 
 type SubscribeStream = Pin<
     Box<
@@ -30,23 +29,30 @@ type SubscribeStream = Pin<
     >,
 >;
 
-#[derive(Clone, Debug)]
-pub(crate) struct GrpcSubscriptionService {
+#[derive(Clone)]
+pub(crate) struct GrpcSubscriptionService<
+    P: SnapshotStore + Clone + Send + Sync + 'static,
+    V: ValidatorSubscriptions + Clone + Send + Sync + 'static,
+> {
     dispatcher: DispatcherHandle,
-    snapshot_client: KsqlAccountSnapshotClient,
-    init_subs_client: InitSubsClient,
+    snapshot_store: P,
+    validator_subscriptions: V,
 }
 
-impl GrpcSubscriptionService {
+impl<
+    P: SnapshotStore + Clone + Send + Sync + 'static,
+    V: ValidatorSubscriptions + Clone + Send + Sync + 'static,
+> GrpcSubscriptionService<P, V>
+{
     pub(crate) fn new(
         dispatcher: DispatcherHandle,
-        snapshot_client: KsqlAccountSnapshotClient,
-        init_subs_client: InitSubsClient,
+        snapshot_store: P,
+        validator_subscriptions: V,
     ) -> Self {
         Self {
             dispatcher,
-            snapshot_client,
-            init_subs_client,
+            snapshot_store,
+            validator_subscriptions,
         }
     }
 
@@ -55,10 +61,13 @@ impl GrpcSubscriptionService {
     }
 }
 
-async fn bootstrap_new_pubkeys(
+async fn bootstrap_new_pubkeys_impl<
+    P: SnapshotStore + Send + Sync,
+    V: ValidatorSubscriptions + Send + Sync,
+>(
     dispatcher: &DispatcherHandle,
-    snapshot_client: &KsqlAccountSnapshotClient,
-    init_subs_client: &InitSubsClient,
+    snapshot_store: &P,
+    validator_subscriptions: &V,
     client_id: u64,
     newly_added: HashSet<[u8; 32]>,
 ) {
@@ -92,8 +101,7 @@ async fn bootstrap_new_pubkeys(
         // will publish one of two Kafka updates:
         // - the current account update if the account exists
         // - a MissingAccount update if the account does not exist
-        let snapshot = match snapshot_client.fetch_one_by_pubkey(&pubkey).await
-        {
+        let snapshot = match snapshot_store.fetch_one_by_pubkey(&pubkey).await {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 warn!(
@@ -178,7 +186,7 @@ async fn bootstrap_new_pubkeys(
         "whitelisting ksql-missing pubkeys with validator"
     );
 
-    if let Err(error) = init_subs_client
+    if let Err(error) = validator_subscriptions
         .whitelist_pubkeys(&pubkeys_to_whitelist)
         .await
     {
@@ -281,7 +289,11 @@ fn parse_filter_op(req: &SubscribeRequest) -> Result<FilterOp, Status> {
 }
 
 #[tonic::async_trait]
-impl Geyser for GrpcSubscriptionService {
+impl<
+    P: SnapshotStore + Clone + Send + Sync + 'static,
+    V: ValidatorSubscriptions + Clone + Send + Sync + 'static,
+> Geyser for GrpcSubscriptionService<P, V>
+{
     type SubscribeStream = SubscribeStream;
 
     async fn subscribe(
@@ -311,8 +323,8 @@ impl Geyser for GrpcSubscriptionService {
 
         // 3. Spawn task to read subsequent messages
         let dispatcher = self.dispatcher.clone();
-        let snapshot_client = self.snapshot_client.clone();
-        let init_subs_client = self.init_subs_client.clone();
+        let snapshot_store = self.snapshot_store.clone();
+        let validator_subscriptions = self.validator_subscriptions.clone();
         tokio::spawn(async move {
             while let Some(result) = request_stream.next().await {
                 match result {
@@ -348,10 +360,12 @@ impl Geyser for GrpcSubscriptionService {
                             }
                         };
 
-                        bootstrap_new_pubkeys(
+                        // Note: self is not available in this spawned task,
+                        // so we call the impl directly with the cloned fields
+                        bootstrap_new_pubkeys_impl(
                             &dispatcher,
-                            &snapshot_client,
-                            &init_subs_client,
+                            &snapshot_store,
+                            &validator_subscriptions,
                             client_id,
                             newly_added,
                         )

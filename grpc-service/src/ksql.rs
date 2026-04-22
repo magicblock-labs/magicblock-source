@@ -262,13 +262,13 @@ impl SnapshotStore for KsqlAccountSnapshotClient {
         &self,
         filter: Option<&PubkeyFilter>,
     ) -> GeykagResult<Vec<AccountState>> {
-        self.fetch_filtered(filter).await
+        KsqlAccountSnapshotClient::fetch_filtered(self, filter).await
     }
 
     async fn fetch_one_by_pubkey(
         &self,
         pubkey: &PubkeyFilter,
     ) -> GeykagResult<Option<AccountState>> {
-        self.fetch_one_by_pubkey(pubkey).await
+        KsqlAccountSnapshotClient::fetch_one_by_pubkey(self, pubkey).await
     }
 }

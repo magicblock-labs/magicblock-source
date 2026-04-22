@@ -188,8 +188,8 @@ impl AccountUpdateSource for KafkaAccountUpdateStream {
         handler: H,
     ) -> GeykagResult<()>
     where
-        H: FnMut(StreamMessage) -> GeykagResult<()>,
+        H: FnMut(StreamMessage) -> GeykagResult<()> + Send,
     {
-        self.run(filter, handler).await
+        KafkaAccountUpdateStream::run(self, filter, handler).await
     }
 }

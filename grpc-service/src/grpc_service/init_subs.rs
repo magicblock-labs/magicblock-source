@@ -49,6 +49,6 @@ impl InitSubsClient {
 
 impl ValidatorSubscriptions for InitSubsClient {
     async fn whitelist_pubkeys(&self, pubkeys: &[String]) -> GeykagResult<()> {
-        self.whitelist_pubkeys(pubkeys).await
+        InitSubsClient::whitelist_pubkeys(self, pubkeys).await
     }
 }

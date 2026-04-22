@@ -2,39 +2,42 @@ use crate::domain::{AccountEvent, AccountState, PubkeyFilter};
 use crate::errors::GeykagResult;
 use crate::kafka::StreamMessage;
 
-pub trait AccountSink {
+pub trait AccountSink: Send + Sync {
     fn write_event(&self, event: &AccountEvent) -> GeykagResult<()>;
 }
 
-pub trait StatusSink {
+pub trait StatusSink: Send + Sync {
     fn write_status(&self, status: &str) -> GeykagResult<()>;
 }
 
 #[allow(dead_code)]
 pub trait SnapshotStore: Send + Sync {
-    async fn fetch_filtered(
+    fn fetch_filtered(
         &self,
         filter: Option<&PubkeyFilter>,
-    ) -> GeykagResult<Vec<AccountState>>;
+    ) -> impl std::future::Future<Output = GeykagResult<Vec<AccountState>>> + Send;
 
-    async fn fetch_one_by_pubkey(
+    fn fetch_one_by_pubkey(
         &self,
         pubkey: &PubkeyFilter,
-    ) -> GeykagResult<Option<AccountState>>;
+    ) -> impl std::future::Future<Output = GeykagResult<Option<AccountState>>> + Send;
 }
 
 #[allow(dead_code)]
 pub trait ValidatorSubscriptions: Send + Sync {
-    async fn whitelist_pubkeys(&self, pubkeys: &[String]) -> GeykagResult<()>;
+    fn whitelist_pubkeys(
+        &self,
+        pubkeys: &[String],
+    ) -> impl std::future::Future<Output = GeykagResult<()>> + Send;
 }
 
 #[allow(dead_code)]
 pub trait AccountUpdateSource: Send + Sync {
-    async fn run<H>(
+    fn run<H>(
         &self,
         filter: Option<&PubkeyFilter>,
         handler: H,
-    ) -> GeykagResult<()>
+    ) -> impl std::future::Future<Output = GeykagResult<()>> + Send
     where
-        H: FnMut(StreamMessage) -> GeykagResult<()>;
+        H: FnMut(StreamMessage) -> GeykagResult<()> + Send;
 }
