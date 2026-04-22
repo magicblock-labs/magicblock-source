@@ -421,9 +421,11 @@ impl<
 
     async fn ping(
         &self,
-        _request: Request<PingRequest>,
+        request: Request<PingRequest>,
     ) -> Result<Response<PongResponse>, Status> {
-        Err(Status::unimplemented("Ping is not supported"))
+        Ok(Response::new(PongResponse {
+            count: request.into_inner().count,
+        }))
     }
 
     async fn get_latest_blockhash(
@@ -474,9 +476,13 @@ mod tests {
     };
     use tokio::time::timeout;
 
+    use helius_laserstream::grpc::PingRequest;
+    use helius_laserstream::grpc::geyser_server::Geyser;
+    use tonic::Request;
+
     use super::{
-        FilterOp, bootstrap_new_pubkeys_impl, parse_accounts_filter,
-        parse_filter_op, parse_pubkey_list,
+        FilterOp, GrpcSubscriptionService, bootstrap_new_pubkeys_impl,
+        parse_accounts_filter, parse_filter_op, parse_pubkey_list,
     };
     use crate::domain::{AccountState, PubkeyFilter, bytes_to_base58};
     use crate::errors::{GeykagError, GeykagResult};
@@ -924,5 +930,19 @@ mod tests {
             whitelisted,
             [pubkey_b58(1), pubkey_b58(2)].into_iter().collect()
         );
+    }
+
+    #[tokio::test]
+    async fn test_ping_returns_ok() {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let snapshot_store = MockSnapshotStore::new(HashMap::new());
+        let validator = MockValidatorSubscriptions::succeed();
+
+        let service =
+            GrpcSubscriptionService::new(dispatcher, snapshot_store, validator);
+
+        let response =
+            service.ping(Request::new(PingRequest { count: 0 })).await;
+        assert!(response.is_ok());
     }
 }
