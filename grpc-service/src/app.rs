@@ -237,11 +237,11 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct FakeSnapshotStore {
+    struct MockSnapshotStore {
         state: Arc<Mutex<Result<Vec<AccountState>, &'static str>>>,
     }
 
-    impl FakeSnapshotStore {
+    impl MockSnapshotStore {
         fn new(
             fetch_filtered_result: Result<Vec<AccountState>, &'static str>,
         ) -> Self {
@@ -251,7 +251,7 @@ mod tests {
         }
     }
 
-    impl SnapshotStore for FakeSnapshotStore {
+    impl SnapshotStore for MockSnapshotStore {
         fn fetch_filtered(
             &self,
             _filter: Option<&PubkeyFilter>,
@@ -274,19 +274,19 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct FakeAccountUpdateSource {
-        state: Arc<Mutex<FakeAccountUpdateSourceState>>,
+    struct MockAccountUpdateSource {
+        state: Arc<Mutex<MockAccountUpdateSourceState>>,
     }
 
-    struct FakeAccountUpdateSourceState {
+    struct MockAccountUpdateSourceState {
         scripted: VecDeque<Result<StreamMessage, &'static str>>,
         called: bool,
     }
 
-    impl FakeAccountUpdateSource {
+    impl MockAccountUpdateSource {
         fn new(scripted: Vec<Result<StreamMessage, &'static str>>) -> Self {
             Self {
-                state: Arc::new(Mutex::new(FakeAccountUpdateSourceState {
+                state: Arc::new(Mutex::new(MockAccountUpdateSourceState {
                     scripted: scripted.into(),
                     called: false,
                 })),
@@ -298,7 +298,7 @@ mod tests {
         }
     }
 
-    impl AccountUpdateSource for FakeAccountUpdateSource {
+    impl AccountUpdateSource for MockAccountUpdateSource {
         fn run<H>(
             &self,
             _filter: Option<&PubkeyFilter>,
@@ -404,9 +404,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_replays_snapshots_then_live_updates() {
-        let snapshot_store = FakeSnapshotStore::new(Ok(vec![account_state(1)]));
+        let snapshot_store = MockSnapshotStore::new(Ok(vec![account_state(1)]));
         let update_source =
-            FakeAccountUpdateSource::new(vec![Ok(stream_message(2))]);
+            MockAccountUpdateSource::new(vec![Ok(stream_message(2))]);
         let sink = RecordingSink::new(false, false);
         let status_sink = RecordingStatusSink::new();
         let app = App::build(
@@ -430,8 +430,8 @@ mod tests {
     #[tokio::test]
     async fn test_run_without_snapshots_and_without_filter_writes_generic_status()
      {
-        let snapshot_store = FakeSnapshotStore::new(Ok(Vec::new()));
-        let update_source = FakeAccountUpdateSource::new(Vec::new());
+        let snapshot_store = MockSnapshotStore::new(Ok(Vec::new()));
+        let update_source = MockAccountUpdateSource::new(Vec::new());
         let status_sink = RecordingStatusSink::new();
         let app = App::build(
             config(None),
@@ -454,8 +454,8 @@ mod tests {
     async fn test_run_without_snapshots_and_with_filter_writes_specific_status()
     {
         let filter = PubkeyFilter::parse(&bytes_to_base58(&[9; 32])).unwrap();
-        let snapshot_store = FakeSnapshotStore::new(Ok(Vec::new()));
-        let update_source = FakeAccountUpdateSource::new(Vec::new());
+        let snapshot_store = MockSnapshotStore::new(Ok(Vec::new()));
+        let update_source = MockAccountUpdateSource::new(Vec::new());
         let status_sink = RecordingStatusSink::new();
         let app = App::build(
             config(Some(filter.clone())),
@@ -481,9 +481,9 @@ mod tests {
     async fn test_snapshot_fetch_error_returns_immediately_and_never_calls_update_source()
      {
         let snapshot_store =
-            FakeSnapshotStore::new(Err("snapshot fetch failed"));
+            MockSnapshotStore::new(Err("snapshot fetch failed"));
         let update_source =
-            FakeAccountUpdateSource::new(vec![Ok(stream_message(1))]);
+            MockAccountUpdateSource::new(vec![Ok(stream_message(1))]);
         let app = App::build(
             config(None),
             snapshot_store,
@@ -501,9 +501,9 @@ mod tests {
     #[tokio::test]
     async fn test_snapshot_sink_failure_returns_immediately_and_never_calls_update_source()
      {
-        let snapshot_store = FakeSnapshotStore::new(Ok(vec![account_state(1)]));
+        let snapshot_store = MockSnapshotStore::new(Ok(vec![account_state(1)]));
         let update_source =
-            FakeAccountUpdateSource::new(vec![Ok(stream_message(1))]);
+            MockAccountUpdateSource::new(vec![Ok(stream_message(1))]);
         let app = App::build(
             config(None),
             snapshot_store,
@@ -520,9 +520,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_live_sink_failure_propagates_from_update_source_callback() {
-        let snapshot_store = FakeSnapshotStore::new(Ok(Vec::new()));
+        let snapshot_store = MockSnapshotStore::new(Ok(Vec::new()));
         let update_source =
-            FakeAccountUpdateSource::new(vec![Ok(stream_message(1))]);
+            MockAccountUpdateSource::new(vec![Ok(stream_message(1))]);
         let app = App::build(
             config(None),
             snapshot_store,
@@ -539,9 +539,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_source_error_propagates() {
-        let snapshot_store = FakeSnapshotStore::new(Ok(Vec::new()));
+        let snapshot_store = MockSnapshotStore::new(Ok(Vec::new()));
         let update_source =
-            FakeAccountUpdateSource::new(vec![Err("source failed")]);
+            MockAccountUpdateSource::new(vec![Err("source failed")]);
         let app = App::build(
             config(None),
             snapshot_store,

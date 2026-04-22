@@ -559,18 +559,18 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct FakeSnapshotStore {
-        state: Arc<Mutex<FakeSnapshotStoreState>>,
+    struct MockSnapshotStore {
+        state: Arc<Mutex<MockSnapshotStoreState>>,
     }
 
-    struct FakeSnapshotStoreState {
+    struct MockSnapshotStoreState {
         fetch_filtered_result: Result<Vec<AccountState>, &'static str>,
         fetch_one_results:
             HashMap<String, Result<Option<AccountState>, &'static str>>,
         requested_pubkeys: Vec<String>,
     }
 
-    impl FakeSnapshotStore {
+    impl MockSnapshotStore {
         fn new(
             fetch_one_results: HashMap<
                 String,
@@ -578,7 +578,7 @@ mod tests {
             >,
         ) -> Self {
             Self {
-                state: Arc::new(Mutex::new(FakeSnapshotStoreState {
+                state: Arc::new(Mutex::new(MockSnapshotStoreState {
                     fetch_filtered_result: Ok(Vec::new()),
                     fetch_one_results,
                     requested_pubkeys: Vec::new(),
@@ -591,7 +591,7 @@ mod tests {
         }
     }
 
-    impl SnapshotStore for FakeSnapshotStore {
+    impl SnapshotStore for MockSnapshotStore {
         fn fetch_filtered(
             &self,
             _filter: Option<&PubkeyFilter>,
@@ -632,19 +632,19 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct FakeValidatorSubscriptions {
-        state: Arc<Mutex<FakeValidatorSubscriptionsState>>,
+    struct MockValidatorSubscriptions {
+        state: Arc<Mutex<MockValidatorSubscriptionsState>>,
     }
 
-    struct FakeValidatorSubscriptionsState {
+    struct MockValidatorSubscriptionsState {
         calls: Vec<Vec<String>>,
         result: Result<(), &'static str>,
     }
 
-    impl FakeValidatorSubscriptions {
+    impl MockValidatorSubscriptions {
         fn succeed() -> Self {
             Self {
-                state: Arc::new(Mutex::new(FakeValidatorSubscriptionsState {
+                state: Arc::new(Mutex::new(MockValidatorSubscriptionsState {
                     calls: Vec::new(),
                     result: Ok(()),
                 })),
@@ -653,7 +653,7 @@ mod tests {
 
         fn fail(message: &'static str) -> Self {
             Self {
-                state: Arc::new(Mutex::new(FakeValidatorSubscriptionsState {
+                state: Arc::new(Mutex::new(MockValidatorSubscriptionsState {
                     calls: Vec::new(),
                     result: Err(message),
                 })),
@@ -665,7 +665,7 @@ mod tests {
         }
     }
 
-    impl ValidatorSubscriptions for FakeValidatorSubscriptions {
+    impl ValidatorSubscriptions for MockValidatorSubscriptions {
         fn whitelist_pubkeys(
             &self,
             pubkeys: &[String],
@@ -743,11 +743,11 @@ mod tests {
             .unwrap();
         tokio::task::yield_now().await;
 
-        let snapshot_store = FakeSnapshotStore::new(HashMap::from([(
+        let snapshot_store = MockSnapshotStore::new(HashMap::from([(
             pubkey_b58(1),
             Ok(Some(snapshot_state(1))),
         )]));
-        let validator = FakeValidatorSubscriptions::succeed();
+        let validator = MockValidatorSubscriptions::succeed();
 
         bootstrap_new_pubkeys_impl(
             &dispatcher,
@@ -785,8 +785,8 @@ mod tests {
         tokio::task::yield_now().await;
 
         let snapshot_store =
-            FakeSnapshotStore::new(HashMap::from([(pubkey_b58(1), Ok(None))]));
-        let validator = FakeValidatorSubscriptions::succeed();
+            MockSnapshotStore::new(HashMap::from([(pubkey_b58(1), Ok(None))]));
+        let validator = MockValidatorSubscriptions::succeed();
 
         bootstrap_new_pubkeys_impl(
             &dispatcher,
@@ -813,11 +813,11 @@ mod tests {
             .unwrap();
         tokio::task::yield_now().await;
 
-        let snapshot_store = FakeSnapshotStore::new(HashMap::from([
+        let snapshot_store = MockSnapshotStore::new(HashMap::from([
             (pubkey_b58(1), Err("fetch failed")),
             (pubkey_b58(2), Ok(None)),
         ]));
-        let validator = FakeValidatorSubscriptions::succeed();
+        let validator = MockValidatorSubscriptions::succeed();
 
         bootstrap_new_pubkeys_impl(
             &dispatcher,
@@ -848,11 +848,11 @@ mod tests {
 
         let mut invalid_snapshot = snapshot_state(1);
         invalid_snapshot.owner_b58 = "0invalid-owner".to_owned();
-        let snapshot_store = FakeSnapshotStore::new(HashMap::from([(
+        let snapshot_store = MockSnapshotStore::new(HashMap::from([(
             pubkey_b58(1),
             Ok(Some(invalid_snapshot)),
         )]));
-        let validator = FakeValidatorSubscriptions::succeed();
+        let validator = MockValidatorSubscriptions::succeed();
 
         bootstrap_new_pubkeys_impl(
             &dispatcher,
@@ -870,11 +870,11 @@ mod tests {
     #[tokio::test]
     async fn test_client_not_found_stops_bootstrap_loop() {
         let dispatcher = DispatcherHandle::spawn(8, 8);
-        let snapshot_store = FakeSnapshotStore::new(HashMap::from([
+        let snapshot_store = MockSnapshotStore::new(HashMap::from([
             (pubkey_b58(1), Ok(Some(snapshot_state(1)))),
             (pubkey_b58(2), Ok(Some(snapshot_state(2)))),
         ]));
-        let validator = FakeValidatorSubscriptions::succeed();
+        let validator = MockValidatorSubscriptions::succeed();
 
         bootstrap_new_pubkeys_impl(
             &dispatcher,
@@ -902,11 +902,11 @@ mod tests {
             .unwrap();
         tokio::task::yield_now().await;
 
-        let snapshot_store = FakeSnapshotStore::new(HashMap::from([
+        let snapshot_store = MockSnapshotStore::new(HashMap::from([
             (pubkey_b58(1), Ok(None)),
             (pubkey_b58(2), Ok(None)),
         ]));
-        let validator = FakeValidatorSubscriptions::fail("whitelist failed");
+        let validator = MockValidatorSubscriptions::fail("whitelist failed");
 
         bootstrap_new_pubkeys_impl(
             &dispatcher,
