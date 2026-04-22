@@ -278,7 +278,10 @@ mod tests {
     use base64::Engine;
     use serde_json::{Value, json};
 
-    use super::{parse_accounts_response, pubkey_bytes_literal};
+    use super::{
+        decode_base64_field, decode_optional_base64_field, parse_account_row,
+        parse_accounts_response, parse_u64_field, pubkey_bytes_literal,
+    };
     use crate::domain::{PubkeyFilter, bytes_to_base58};
     use crate::errors::GeykagError;
 
@@ -444,5 +447,203 @@ mod tests {
             .unwrap();
 
         assert_eq!(decoded, valid_pubkey_bytes());
+    }
+
+    #[test]
+    fn parse_account_row_rejects_wrong_column_count() {
+        let error = parse_account_row(&[json!(valid_base64_pubkey_field())])
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            GeykagError::UnexpectedKsqlColumnCount { actual: 1 }
+        ));
+    }
+
+    #[test]
+    fn parse_account_row_rejects_invalid_slot_integer() {
+        let mut row = valid_ksql_row(&valid_pubkey_bytes());
+        row.as_array_mut().unwrap()[1] = json!("bad-slot");
+
+        let error = parse_account_row(row.as_array().unwrap()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            GeykagError::KsqlParseField { field: "SLOT", .. }
+        ));
+    }
+
+    #[test]
+    fn parse_account_row_rejects_invalid_lamports_integer() {
+        let mut row = valid_ksql_row(&valid_pubkey_bytes());
+        row.as_array_mut().unwrap()[2] = json!("bad-lamports");
+
+        let error = parse_account_row(row.as_array().unwrap()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            GeykagError::KsqlParseField {
+                field: "LAMPORTS",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_account_row_rejects_non_boolean_executable() {
+        let mut row = valid_ksql_row(&valid_pubkey_bytes());
+        row.as_array_mut().unwrap()[4] = json!("true");
+
+        let error = parse_account_row(row.as_array().unwrap()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            GeykagError::KsqlParseField {
+                field: "EXECUTABLE",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_account_row_rejects_invalid_rent_epoch_integer() {
+        let mut row = valid_ksql_row(&valid_pubkey_bytes());
+        row.as_array_mut().unwrap()[5] = json!(false);
+
+        let error = parse_account_row(row.as_array().unwrap()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            GeykagError::KsqlParseField {
+                field: "RENT_EPOCH",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_account_row_rejects_invalid_write_version_integer() {
+        let mut row = valid_ksql_row(&valid_pubkey_bytes());
+        row.as_array_mut().unwrap()[7] = json!(true);
+
+        let error = parse_account_row(row.as_array().unwrap()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            GeykagError::KsqlParseField {
+                field: "WRITE_VERSION",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_account_row_rejects_invalid_pubkey_base64() {
+        let mut row = valid_ksql_row(&valid_pubkey_bytes());
+        row.as_array_mut().unwrap()[0] = json!("%%%");
+
+        let error = parse_account_row(row.as_array().unwrap()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            GeykagError::KsqlDecodeBase64Field {
+                field: "PUBKEY",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parse_account_row_rejects_invalid_owner_base64() {
+        let mut row = valid_ksql_row(&valid_pubkey_bytes());
+        row.as_array_mut().unwrap()[3] = json!("%%%");
+
+        let error = parse_account_row(row.as_array().unwrap()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            GeykagError::KsqlDecodeBase64Field { field: "OWNER", .. }
+        ));
+    }
+
+    #[test]
+    fn parse_account_row_rejects_invalid_data_base64() {
+        let mut row = valid_ksql_row(&valid_pubkey_bytes());
+        row.as_array_mut().unwrap()[6] = json!("%%%");
+
+        let error = parse_account_row(row.as_array().unwrap()).unwrap_err();
+
+        assert!(matches!(
+            error,
+            GeykagError::KsqlDecodeBase64Field { field: "DATA", .. }
+        ));
+    }
+
+    #[test]
+    fn parse_account_row_rejects_invalid_txn_signature_base64() {
+        let mut row = valid_ksql_row(&valid_pubkey_bytes());
+        row.as_array_mut().unwrap()[8] = json!("%%%");
+
+        let error = parse_account_row(row.as_array().unwrap()).unwrap_err();
+
+        assert!(matches!(error, GeykagError::KsqlDecodeTxnSignature { .. }));
+    }
+
+    #[test]
+    fn parse_account_row_accepts_empty_data() {
+        let mut row = valid_ksql_row(&valid_pubkey_bytes());
+        row.as_array_mut().unwrap()[6] = json!("");
+
+        let account = parse_account_row(row.as_array().unwrap()).unwrap();
+
+        assert_eq!(account.data_len, 0);
+    }
+
+    #[test]
+    fn parse_account_row_accepts_empty_optional_txn_signature() {
+        let mut row = valid_ksql_row(&valid_pubkey_bytes());
+        row.as_array_mut().unwrap()[8] = json!("");
+
+        let account = parse_account_row(row.as_array().unwrap()).unwrap();
+
+        assert_eq!(account.txn_signature_b58, None);
+    }
+
+    #[test]
+    fn parse_u64_field_accepts_u64_values() {
+        assert_eq!(parse_u64_field(&json!(42_u64)).unwrap(), 42);
+    }
+
+    #[test]
+    fn parse_u64_field_accepts_non_negative_i64_values() {
+        assert_eq!(parse_u64_field(&json!(42_i64)).unwrap(), 42);
+    }
+
+    #[test]
+    fn parse_u64_field_rejects_string_values() {
+        let error = parse_u64_field(&json!("42")).unwrap_err();
+
+        assert!(matches!(error, GeykagError::InvalidJsonInteger { .. }));
+    }
+
+    #[test]
+    fn parse_u64_field_rejects_boolean_values() {
+        let error = parse_u64_field(&json!(true)).unwrap_err();
+
+        assert!(matches!(error, GeykagError::InvalidJsonInteger { .. }));
+    }
+
+    #[test]
+    fn decode_base64_field_rejects_non_string_json() {
+        let error = decode_base64_field(&json!(123)).unwrap_err();
+
+        assert!(matches!(error, GeykagError::ExpectedBase64String));
+    }
+
+    #[test]
+    fn decode_optional_base64_field_rejects_non_string_json() {
+        let error = decode_optional_base64_field(&json!(123)).unwrap_err();
+
+        assert!(matches!(error, GeykagError::ExpectedOptionalBase64String));
     }
 }
