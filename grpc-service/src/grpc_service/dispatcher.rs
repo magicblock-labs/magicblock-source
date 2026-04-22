@@ -532,6 +532,7 @@ impl DispatcherHandle {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -769,10 +770,12 @@ mod tests {
     #[tokio::test]
     async fn test_add_client_registers_client_and_receives_matching_updates() {
         let dispatcher = DispatcherHandle::spawn(8, 8);
-        let filter = [pubkey(1)].into_iter().collect();
-        let (_client_id, mut rx) =
-            dispatcher.add_client(filter, 8).await.unwrap();
-        tokio::task::yield_now().await;
+        let filter: HashSet<[u8; 32]> = [pubkey(1)].into_iter().collect();
+        let (client_id, mut rx) =
+            dispatcher.add_client(filter.clone(), 8).await.unwrap();
+        // Acknowledged round-trip ensures the AddClient command has been
+        // processed before we publish.
+        dispatcher.update_filter(client_id, filter).await.unwrap();
 
         dispatcher
             .try_publish(update_for_pubkey(pubkey(1)))
@@ -836,13 +839,21 @@ mod tests {
     #[tokio::test]
     async fn test_remove_client_prevents_further_delivery() {
         let dispatcher = DispatcherHandle::spawn(8, 8);
-        let filter = [pubkey(1)].into_iter().collect();
+        let filter: HashSet<[u8; 32]> = [pubkey(1)].into_iter().collect();
         let (client_id, mut rx) =
-            dispatcher.add_client(filter, 8).await.unwrap();
-        tokio::task::yield_now().await;
+            dispatcher.add_client(filter.clone(), 8).await.unwrap();
+        // Acknowledged round-trip ensures AddClient has been processed.
+        dispatcher.update_filter(client_id, filter).await.unwrap();
 
         dispatcher.remove_client(client_id).await;
-        tokio::task::yield_now().await;
+        // Acknowledged round-trip ensures RemoveClient has been processed.
+        assert_eq!(
+            dispatcher
+                .send_to_client(client_id, update_for_pubkey(pubkey(1)))
+                .await
+                .unwrap(),
+            TargetedSendResult::ClientNotFound,
+        );
         dispatcher
             .try_publish(update_for_pubkey(pubkey(1)))
             .unwrap();
