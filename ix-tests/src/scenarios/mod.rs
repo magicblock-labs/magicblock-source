@@ -1,4 +1,5 @@
 mod single_basic;
+mod single_load;
 
 use anyhow::bail;
 
@@ -11,9 +12,8 @@ pub async fn run_scenario(
 ) -> anyhow::Result<()> {
     match name {
         ScenarioName::SingleBasic => single_basic::run(ctx).await,
-        ScenarioName::SingleLoad
-        | ScenarioName::DualConcurrent
-        | ScenarioName::DualRestart => {
+        ScenarioName::SingleLoad => single_load::run(ctx).await,
+        ScenarioName::DualConcurrent | ScenarioName::DualRestart => {
             bail!("scenario not implemented: {}", name.as_str())
         }
         ScenarioName::All => bail!("scenario dispatch does not accept 'all'"),
