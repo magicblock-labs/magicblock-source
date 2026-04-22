@@ -12,6 +12,7 @@ This repo contains the MagicBlock account update pipeline:
 - `event-proto/`: shared Rust crate `magigblock-event-proto`
 - `grpc-service/`: Rust crate `magigblock-grpc-service`
 - `geyser-plugin/`: Solana Geyser plugin crate
+- `ix-tests/`: local end-to-end gRPC integration harness
 - `kafka-setup/`: minimal Kafka/ksqlDB local environment
 - `Makefile`: top-level operator entrypoint
 
@@ -36,6 +37,9 @@ cargo test --workspace -- --test-threads=16
 - `make kafka-ready`
 - `make kafka-ui`
 - `make kafka-ui-down`
+- `make ix-tests-build`
+- `make ix-tests-run`
+- `make ix-tests-scenario SCENARIO=single-basic`
 - `make grpc-service-run`
 - `make grpc-service-build`
 - `make grpc-service-client`
@@ -43,3 +47,5 @@ cargo test --workspace -- --test-threads=16
 - `make grpc-service-client-remove-sub PUBKEY=<base58-pubkey>`
 - `make geyser-plugin-build`
 - `make geyser-plugin-launch`
+
+The integration suite assumes Kafka/ksqlDB and the validator-with-plugin are already up. Scenarios are isolated and can be run individually. Failure artifacts are written under `target/ix-tests/failures/`.

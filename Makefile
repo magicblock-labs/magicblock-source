@@ -10,6 +10,9 @@ CLIENT_REST ?= http://127.0.0.1:3030
 	kafka-ready \
 	kafka-ui \
 	kafka-ui-down \
+	ix-tests-build \
+	ix-tests-run \
+	ix-tests-scenario \
 	grpc-service-run \
 	grpc-service-build \
 	grpc-service-client \
@@ -27,6 +30,9 @@ help:
 	@echo "  kafka-ready                   - Start the stack and initialize stream/table/schema"
 	@echo "  kafka-ui                      - Start Redpanda Console"
 	@echo "  kafka-ui-down                 - Stop Redpanda Console"
+	@echo "  ix-tests-build                 - Build the gRPC service binary and the ix-tests harness"
+	@echo "  ix-tests-run                   - Run the full local integration suite"
+	@echo "  ix-tests-scenario              - Run one integration scenario (SCENARIO=...)"
 	@echo "  grpc-service-run              - Run the gRPC service"
 	@echo "  grpc-service-build            - Build the gRPC service package"
 	@echo "  grpc-service-client           - Run the example gRPC client"
@@ -60,6 +66,17 @@ kafka-ui:
 
 kafka-ui-down:
 	$(MAKE) -C kafka-setup ui-down
+
+ix-tests-build:
+	cargo build -p magigblock-grpc-service
+	cargo build -p ix-tests
+
+ix-tests-run:
+	cargo run -p ix-tests -- --config ix-tests/configs/suite.toml --scenario all
+
+ix-tests-scenario:
+	@test -n "$(SCENARIO)" || (echo "Provide SCENARIO=..." >&2; exit 1)
+	cargo run -p ix-tests -- --config ix-tests/configs/suite.toml --scenario "$(SCENARIO)"
 
 grpc-service-run:
 	$(MAKE) -C grpc-service run
