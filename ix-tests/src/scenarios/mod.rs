@@ -1,4 +1,5 @@
 mod dual_concurrent;
+mod dual_restart;
 mod single_basic;
 mod single_load;
 
@@ -15,9 +16,7 @@ pub async fn run_scenario(
         ScenarioName::SingleBasic => single_basic::run(ctx).await,
         ScenarioName::SingleLoad => single_load::run(ctx).await,
         ScenarioName::DualConcurrent => dual_concurrent::run(ctx).await,
-        ScenarioName::DualRestart => {
-            bail!("scenario not implemented: {}", name.as_str())
-        }
+        ScenarioName::DualRestart => dual_restart::run(ctx).await,
         ScenarioName::All => bail!("scenario dispatch does not accept 'all'"),
     }
 }
