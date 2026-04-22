@@ -3,12 +3,16 @@ mod accounts;
 mod artifacts;
 mod cli;
 mod config;
-#[allow(dead_code)]
 mod layout;
 mod runner;
 mod scenario;
+mod service;
 
 use tracing::info;
+
+use crate::layout::ServiceInstance;
+use crate::scenario::ScenarioName;
+use crate::service::{ServiceController, ServiceSpec};
 
 fn init_tracing() {
     tracing_subscriber::fmt()
@@ -20,7 +24,8 @@ fn init_tracing() {
         .init();
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     init_tracing();
 
     let cli = cli::Cli::parse()?;
@@ -43,9 +48,18 @@ fn main() -> anyhow::Result<()> {
     let names: Vec<&str> = scenarios.iter().map(|s| s.as_str()).collect();
     info!(scenarios = ?names, "resolved scenario execution order");
 
+    let controller = ServiceController::new(&config);
+
     for scenario in &scenarios {
         info!(scenario = scenario.as_str(), "running scenario");
         let artifacts = artifacts::RunArtifacts::new(&config, *scenario)?;
+
+        if *scenario == ScenarioName::SingleBasic {
+            let spec = ServiceSpec::for_instance(ServiceInstance::One);
+            let svc = controller.start(&spec, &artifacts).await?;
+            controller.shutdown(svc).await?;
+        }
+
         artifacts.cleanup_success()?;
         info!(scenario = scenario.as_str(), "scenario passed");
     }
