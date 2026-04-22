@@ -32,7 +32,7 @@ impl KsqlPubkeyRestoreClient {
     }
 
     pub(crate) fn fetch_pubkeys(&self) -> io::Result<Vec<[u8; 32]>> {
-        let sql = format!("SELECT \"PUBKEY\" FROM \"{}\";", self.table);
+        let sql = format!("SELECT PUBKEY FROM {};", self.table);
         let query_url = format!("{}/query-stream", self.base_url);
         debug!(
             "Querying ksql for startup restore, url={}, sql={}",
@@ -49,11 +49,17 @@ impl KsqlPubkeyRestoreClient {
             .send()
             .map_err(|error| {
                 io::Error::other(format!("failed to query ksqlDB: {error}"))
-            })?
-            .error_for_status()
-            .map_err(|error| {
-                io::Error::other(format!("ksqlDB query failed: {error}"))
             })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().unwrap_or_else(|error| {
+                format!("<failed to read ksql error body: {error}>")
+            });
+            return Err(io::Error::other(format!(
+                "ksqlDB query failed with HTTP status {status}: {body}"
+            )));
+        }
 
         let reader = BufReader::new(response);
         let pubkeys = parse_pubkeys_stream(reader)?;
