@@ -3,7 +3,10 @@ pub mod prom;
 pub mod subscriptions;
 
 use {
-    crate::{initial_account_backfill::InitialAccountBackfillHandle, metrics::register_metrics},
+    crate::{
+        initial_account_backfill::InitialAccountBackfillHandle,
+        metrics::register_metrics,
+    },
     bytes::Bytes,
     http::StatusCode,
     http_body_util::Full,
@@ -52,10 +55,16 @@ impl HttpService {
 
                 let service = service_fn(move |req: Request<Incoming>| {
                     let subs = subs.clone();
-                    let initial_account_backfill = initial_account_backfill.clone();
+                    let initial_account_backfill =
+                        initial_account_backfill.clone();
                     async move {
-                        let response =
-                            route(req, subs, initial_account_backfill, metrics_enabled).await;
+                        let response = route(
+                            req,
+                            subs,
+                            initial_account_backfill,
+                            metrics_enabled,
+                        )
+                        .await;
                         Ok::<_, hyper::Error>(response)
                     }
                 });
@@ -87,7 +96,8 @@ async fn route(
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/metrics") if metrics_enabled => metrics_handler(),
         (&Method::POST, "/filters/accounts") => {
-            accounts::handle_post_accounts(req, subs, initial_account_backfill).await
+            accounts::handle_post_accounts(req, subs, initial_account_backfill)
+                .await
         }
         _ => not_found(),
     }
@@ -105,7 +115,8 @@ fn not_found() -> Response<Full<Bytes>> {
                 .status(StatusCode::NOT_FOUND)
                 .body(Full::new(Bytes::new()))
                 .unwrap_or_else(|_| {
-                    let (mut parts, _) = Response::new(Full::new(Bytes::new())).into_parts();
+                    let (mut parts, _) =
+                        Response::new(Full::new(Bytes::new())).into_parts();
                     parts.status = StatusCode::NOT_FOUND;
                     Response::from_parts(parts, Full::new(Bytes::new()))
                 })

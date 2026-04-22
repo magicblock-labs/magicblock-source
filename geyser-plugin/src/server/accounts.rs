@@ -138,7 +138,10 @@ pub async fn handle_post_accounts(
     initial_account_backfill: InitialAccountBackfillHandle,
 ) -> Response<Full<Bytes>> {
     use http_body_util::BodyExt;
-    let body_bytes = match Limited::new(req.into_body(), MAX_BODY_SIZE).collect().await {
+    let body_bytes = match Limited::new(req.into_body(), MAX_BODY_SIZE)
+        .collect()
+        .await
+    {
         Ok(collected) => collected.to_bytes(),
         Err(e) => {
             return if e
@@ -150,14 +153,22 @@ pub async fn handle_post_accounts(
                     &format!("body exceeds max size of {MAX_BODY_SIZE} bytes"),
                 )
             } else {
-                error_response(StatusCode::BAD_REQUEST, &format!("body read error: {e}"))
+                error_response(
+                    StatusCode::BAD_REQUEST,
+                    &format!("body read error: {e}"),
+                )
             };
         }
     };
 
     let parsed: AddAccountsRequest = match serde_json::from_slice(&body_bytes) {
         Ok(v) => v,
-        Err(e) => return error_response(StatusCode::BAD_REQUEST, &format!("invalid JSON: {e}")),
+        Err(e) => {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                &format!("invalid JSON: {e}"),
+            );
+        }
     };
 
     let mut keys = Vec::with_capacity(parsed.pubkeys.len());
@@ -174,7 +185,9 @@ pub async fn handle_post_accounts(
     }
 
     match add_accounts(&subs, &initial_account_backfill, keys) {
-        Ok(outcome) => json_response(StatusCode::OK, &AccountsResponse::from(outcome)),
+        Ok(outcome) => {
+            json_response(StatusCode::OK, &AccountsResponse::from(outcome))
+        }
         Err(AddAccountsError::QueueFull(outcome)) => json_response(
             StatusCode::SERVICE_UNAVAILABLE,
             &AccountsResponse::from(outcome),
@@ -199,7 +212,10 @@ impl From<AddAccountsOutcome> for AccountsResponse {
     }
 }
 
-fn json_response<T: serde::Serialize>(status: StatusCode, body: &T) -> Response<Full<Bytes>> {
+fn json_response<T: serde::Serialize>(
+    status: StatusCode,
+    body: &T,
+) -> Response<Full<Bytes>> {
     let json = match serde_json::to_vec(body) {
         Ok(j) => j,
         Err(e) => {
@@ -236,7 +252,8 @@ fn error_500() -> Response<Full<Bytes>> {
                 .body(Full::new(Bytes::new()))
                 .unwrap_or_else(|_| {
                     // Final fallback: bare 500 response
-                    let (mut parts, _) = Response::new(Full::new(Bytes::new())).into_parts();
+                    let (mut parts, _) =
+                        Response::new(Full::new(Bytes::new())).into_parts();
                     parts.status = StatusCode::INTERNAL_SERVER_ERROR;
                     Response::from_parts(parts, Full::new(Bytes::new()))
                 })
@@ -270,7 +287,8 @@ mod tests {
         let subs = AccountSubscriptions::new();
         let test_handle = InitialAccountBackfillHandle::new_test(4);
 
-        let outcome = add_accounts(&subs, &test_handle, vec![pk(1), pk(2)]).unwrap();
+        let outcome =
+            add_accounts(&subs, &test_handle, vec![pk(1), pk(2)]).unwrap();
 
         assert_eq!(outcome.accepted_count, 2);
         assert_eq!(outcome.newly_added_count, 2);
@@ -285,7 +303,9 @@ mod tests {
         let test_handle = InitialAccountBackfillHandle::new_test(4);
 
         let _ = add_accounts(&subs, &test_handle, vec![pk(3)]).unwrap();
-        let outcome = add_accounts(&subs, &test_handle, vec![pk(3), pk(4), pk(4)]).unwrap();
+        let outcome =
+            add_accounts(&subs, &test_handle, vec![pk(3), pk(4), pk(4)])
+                .unwrap();
 
         assert_eq!(outcome.accepted_count, 3);
         assert_eq!(outcome.newly_added_count, 1);
@@ -311,7 +331,8 @@ mod tests {
         let test_handle = InitialAccountBackfillHandle::new_test(1);
         test_handle.prefill_queue_for_test(vec![pk(50)]);
 
-        let error = add_accounts(&subs, &test_handle, vec![pk(51), pk(52)]).unwrap_err();
+        let error = add_accounts(&subs, &test_handle, vec![pk(51), pk(52)])
+            .unwrap_err();
 
         match error {
             AddAccountsError::QueueFull(outcome) => {

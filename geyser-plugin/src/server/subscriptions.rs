@@ -39,7 +39,10 @@ impl AccountSubscriptions {
     }
 
     /// Add pubkeys and report how many were newly inserted versus duplicates.
-    pub fn add<I: IntoIterator<Item = [u8; 32]>>(&self, pubkeys: I) -> AddAccountsResult {
+    pub fn add<I: IntoIterator<Item = [u8; 32]>>(
+        &self,
+        pubkeys: I,
+    ) -> AddAccountsResult {
         let mut newly_added = Vec::new();
         let mut request_seen = HashSet::new();
         let mut duplicate_count = 0;

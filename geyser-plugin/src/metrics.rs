@@ -101,7 +101,10 @@ impl ClientContext for StatsThreadedProducerContext {
             macro_rules! set_value {
                 ($name:expr, $value:expr) => {
                     KAFKA_STATS
-                        .with_label_values(&[&name.to_string(), &$name.to_string()])
+                        .with_label_values(&[
+                            &name.to_string(),
+                            &$name.to_string(),
+                        ])
                         .set($value as f64);
                 };
             }
