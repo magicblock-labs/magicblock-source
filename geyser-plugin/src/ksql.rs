@@ -32,7 +32,8 @@ impl KsqlPubkeyRestoreClient {
     }
 
     pub(crate) fn fetch_pubkeys(&self) -> io::Result<Vec<[u8; 32]>> {
-        let sql = format!("SELECT PUBKEY FROM {};", self.table);
+        let table = validate_ksql_identifier(&self.table)?;
+        let sql = format!("SELECT PUBKEY FROM {table};");
         let query_url = format!("{}/query-stream", self.base_url);
         debug!(
             "Querying ksql for startup restore, url={}, sql={}",
@@ -69,6 +70,30 @@ impl KsqlPubkeyRestoreClient {
         );
         Ok(pubkeys)
     }
+}
+
+/// Validates that `identifier` is a safe ksqlDB identifier suitable for
+/// direct interpolation into a SQL statement. The identifier must start with
+/// an ASCII letter or `_` and may otherwise contain only ASCII alphanumeric
+/// characters or `_`.
+pub(crate) fn validate_ksql_identifier(identifier: &str) -> io::Result<&str> {
+    let mut chars = identifier.chars();
+    let first = chars
+        .next()
+        .ok_or_else(|| io::Error::other("ksql identifier must not be empty"))?;
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return Err(io::Error::other(format!(
+            "invalid ksql identifier `{identifier}`: must start with an ASCII letter or `_`"
+        )));
+    }
+    for c in chars {
+        if !(c.is_ascii_alphanumeric() || c == '_') {
+            return Err(io::Error::other(format!(
+                "invalid ksql identifier `{identifier}`: only ASCII alphanumeric characters and `_` are allowed"
+            )));
+        }
+    }
+    Ok(identifier)
 }
 
 pub(crate) fn parse_pubkeys_stream(
@@ -147,7 +172,7 @@ pub(crate) fn parse_pubkeys_stream(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_pubkeys_stream;
+    use super::{parse_pubkeys_stream, validate_ksql_identifier};
 
     fn pubkey(byte: u8) -> [u8; 32] {
         [byte; 32]
@@ -222,5 +247,38 @@ mod tests {
             .to_string();
 
         assert!(error.contains("expected 32 decoded PUBKEY bytes"));
+    }
+
+    #[test]
+    fn test_validates_simple_identifier() {
+        assert_eq!(validate_ksql_identifier("accounts").unwrap(), "accounts");
+        assert_eq!(validate_ksql_identifier("_x").unwrap(), "_x");
+        assert_eq!(validate_ksql_identifier("A1_b2").unwrap(), "A1_b2");
+    }
+
+    #[test]
+    fn test_rejects_empty_identifier() {
+        let error = validate_ksql_identifier("").unwrap_err().to_string();
+        assert!(error.contains("must not be empty"));
+    }
+
+    #[test]
+    fn test_rejects_identifier_starting_with_digit() {
+        let error = validate_ksql_identifier("1bad").unwrap_err().to_string();
+        assert!(error.contains("must start with an ASCII letter"));
+    }
+
+    #[test]
+    fn test_rejects_identifier_with_invalid_characters() {
+        let error = validate_ksql_identifier("accounts; DROP TABLE x")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("only ASCII alphanumeric"));
+    }
+
+    #[test]
+    fn test_rejects_identifier_with_quote() {
+        let error = validate_ksql_identifier("a\"b").unwrap_err().to_string();
+        assert!(error.contains("only ASCII alphanumeric"));
     }
 }
