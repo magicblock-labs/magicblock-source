@@ -134,16 +134,32 @@ impl Config {
                     config_path,
                     &wrapper.config_file,
                 ),
-                Err(_) => config_path.to_path_buf(),
+                Err(error) => {
+                    let looks_like_json = config_path
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+                        || matches!(
+                            contents.trim_start().as_bytes().first(),
+                            Some(b'{') | Some(b'[')
+                        );
+                    if looks_like_json {
+                        return Err(GeyserPluginError::ConfigFileReadError {
+                            msg: error.to_string(),
+                        });
+                    }
+                    config_path.to_path_buf()
+                }
             };
         let runtime_contents = if runtime_path == config_path {
             contents
         } else {
             read_to_string(&runtime_path)?
         };
-        let mut this: Self = toml::from_str(&runtime_contents).map_err(|e| {
-            GeyserPluginError::ConfigFileReadError { msg: e.to_string() }
-        })?;
+        let mut this: Self =
+            toml::from_str(&runtime_contents).map_err(|e| {
+                GeyserPluginError::ConfigFileReadError { msg: e.to_string() }
+            })?;
         this.fill_defaults();
         this.validate()?;
         Ok(this)
