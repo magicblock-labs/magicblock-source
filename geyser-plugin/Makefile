@@ -20,9 +20,9 @@ help:
 
 init-config:
 	@echo "Creating $(PLUGIN_CONFIG)..."
-	@perl -0pe 's|target/release/libsolana_accountsdb_plugin_kafka\.(?:dylib|so)|$(PLUGIN_PATH)|g' configs/plugin-config.example.toml > "$(PLUGIN_CONFIG)"
+	@perl -0pe 's#(?<!\.\./)target/release/libsolana_accountsdb_plugin_kafka\.(?:dylib|so)#$(PLUGIN_PATH)#g' configs/plugin-config.example.toml > "$(PLUGIN_CONFIG)"
 	@echo "Creating $(VALIDATOR_CONFIG)..."
-	@perl -0pe 's|target/release/libsolana_accountsdb_plugin_kafka\.(?:dylib|so)|$(PLUGIN_PATH)|g; s|plugin-config.toml|$(PLUGIN_CONFIG)|g' configs/plugin-config.example.json > "$(VALIDATOR_CONFIG)"
+	@perl -0pe 's#(?<!\.\./)target/release/libsolana_accountsdb_plugin_kafka\.(?:dylib|so)#$(PLUGIN_PATH)#g; s#plugin-config\.toml#$(PLUGIN_CONFIG)#g' configs/plugin-config.example.json > "$(VALIDATOR_CONFIG)"
 	@echo "✓ Created $(PLUGIN_CONFIG)"
 	@echo "✓ Created $(VALIDATOR_CONFIG)"
 
