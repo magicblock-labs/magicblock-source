@@ -139,8 +139,8 @@ fn log_ignore_account_update(pubkey: &[u8]) {
         );
         return;
     }
-    if log_enabled!(::log::Level::Debug) {
-        debug!("Ignoring update for account key bytes: {:?}", pubkey);
+    if log_enabled!(::log::Level::Trace) {
+        trace!("Ignoring update for account key bytes: {:?}", pubkey);
     }
 }
 

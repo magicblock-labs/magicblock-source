@@ -19,7 +19,11 @@ use {
     reqwest::Url,
     serde::Deserialize,
     std::{
-        collections::BTreeMap, fs::File, io::Read, net::SocketAddr, path::Path,
+        collections::BTreeMap,
+        fs::File,
+        io::Read,
+        net::SocketAddr,
+        path::{Path, PathBuf},
     },
 };
 
@@ -28,7 +32,8 @@ use {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[allow(dead_code)]
-    libpath: String,
+    #[serde(default)]
+    libpath: Option<String>,
 
     /// Kafka config.
     pub kafka: KafkaConfig,
@@ -70,6 +75,14 @@ pub struct PluginConfig {
     pub metrics: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ValidatorConfig {
+    #[allow(dead_code)]
+    libpath: String,
+    config_file: PathBuf,
+}
+
 fn default_shutdown_timeout_ms() -> u64 {
     30_000
 }
@@ -81,7 +94,7 @@ fn default_ksql_table() -> String {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            libpath: "".to_owned(),
+            libpath: None,
             kafka: KafkaConfig {
                 bootstrap_servers: String::new(),
                 topic: String::new(),
@@ -111,14 +124,42 @@ impl Default for KsqlConfig {
 }
 
 impl Config {
-    /// Read plugin from TOML file.
+    /// Read plugin config from either a validator JSON wrapper or a TOML runtime config.
     pub fn read_from<P: AsRef<Path>>(config_path: P) -> PluginResult<Self> {
-        let mut file = File::open(config_path)?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        let mut this: Self = toml::from_str(&contents).map_err(|e| {
-            GeyserPluginError::ConfigFileReadError { msg: e.to_string() }
-        })?;
+        let config_path = config_path.as_ref();
+        let contents = read_to_string(config_path)?;
+        let runtime_path =
+            match serde_json::from_str::<ValidatorConfig>(&contents) {
+                Ok(wrapper) => resolve_runtime_config_path(
+                    config_path,
+                    &wrapper.config_file,
+                ),
+                Err(error) => {
+                    let looks_like_json = config_path
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
+                        || matches!(
+                            contents.trim_start().as_bytes().first(),
+                            Some(b'{') | Some(b'[')
+                        );
+                    if looks_like_json {
+                        return Err(GeyserPluginError::ConfigFileReadError {
+                            msg: error.to_string(),
+                        });
+                    }
+                    config_path.to_path_buf()
+                }
+            };
+        let runtime_contents = if runtime_path == config_path {
+            contents
+        } else {
+            read_to_string(&runtime_path)?
+        };
+        let mut this: Self =
+            toml::from_str(&runtime_contents).map_err(|e| {
+                GeyserPluginError::ConfigFileReadError { msg: e.to_string() }
+            })?;
         this.fill_defaults();
         this.validate()?;
         Ok(this)
@@ -209,9 +250,34 @@ impl Config {
     }
 }
 
+fn read_to_string(path: &Path) -> PluginResult<String> {
+    let mut file = File::open(path)?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    Ok(contents)
+}
+
+fn resolve_runtime_config_path(
+    wrapper_path: &Path,
+    runtime_path: &Path,
+) -> PathBuf {
+    if runtime_path.is_absolute() {
+        runtime_path.to_path_buf()
+    } else {
+        wrapper_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(runtime_path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Config;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn parse_config(toml: &str) -> Result<Config, String> {
         let mut config: Config =
@@ -240,6 +306,68 @@ admin = "127.0.0.1:8080"
 
         assert_eq!(config.kafka.topic, "solana.testnet.account_updates");
         assert_eq!(config.plugin.local_rpc_url, "http://127.0.0.1:8899");
+    }
+
+    #[test]
+    fn test_parses_valid_minimal_config_without_libpath() {
+        let config = parse_config(
+            r#"
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.kafka.topic, "solana.testnet.account_updates");
+        assert_eq!(config.plugin.local_rpc_url, "http://127.0.0.1:8899");
+    }
+
+    #[test]
+    fn test_reads_runtime_toml_via_validator_json_wrapper() {
+        let base = std::env::temp_dir().join(format!(
+            "geyser-plugin-config-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&base).unwrap();
+
+        let runtime_path = base.join("runtime.toml");
+        fs::write(
+            &runtime_path,
+            r#"
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
+        )
+        .unwrap();
+
+        let wrapper_path = base.join("plugin-config.json");
+        fs::write(
+            &wrapper_path,
+            r#"{
+  "libpath": "target/release/libsolana_accountsdb_plugin_kafka.so",
+  "config_file": "runtime.toml"
+}"#,
+        )
+        .unwrap();
+
+        let config = Config::read_from(&wrapper_path).unwrap();
+        assert_eq!(config.kafka.topic, "solana.testnet.account_updates");
+        assert_eq!(config.plugin.admin.port(), 8080);
+
+        fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
