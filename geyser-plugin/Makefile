@@ -38,9 +38,13 @@ launch: build-plugin
 		exit 1; \
 	fi
 	@if [ ! -f "$(PLUGIN_CONFIG)" ]; then \
-		echo "Error: $(PLUGIN_CONFIG) not found"; \
-		echo "Please create a plugin config file first"; \
-		exit 1; \
+		cf=$$(perl -0ne 'print $$1 if /"config_file"\s*:\s*"([^"]+)"/' "$(VALIDATOR_CONFIG)"); \
+		if [ -z "$$cf" ] || [ ! -f "$$cf" ]; then \
+			echo "Error: plugin config not found"; \
+			echo "  Tried $(PLUGIN_CONFIG) and config_file from $(VALIDATOR_CONFIG) ($$cf)"; \
+			echo "Please create a plugin config file first"; \
+			exit 1; \
+		fi; \
 	fi
 	solana-test-validator --log --reset --geyser-plugin-config "$(VALIDATOR_CONFIG)"
 
