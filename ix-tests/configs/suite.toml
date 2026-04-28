@@ -2,5 +2,5 @@ service_binary = "target/debug/magigblock-grpc-service"
 validator_rpc_url = "http://127.0.0.1:8899"
 failure_artifact_root = "target/ix-tests/failures"
 service_start_timeout_ms = 10000
-checkpoint_timeout_ms = 20000
-transaction_timeout_ms = 20000
+checkpoint_timeout_ms = 2000
+transaction_timeout_ms = 2000
