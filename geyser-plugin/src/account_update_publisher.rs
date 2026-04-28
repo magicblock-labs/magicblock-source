@@ -69,8 +69,9 @@ fn publish_raw_account_update(
 ) -> PluginResult<()> {
     if let Ok(key) = <[u8; 32]>::try_from(event.pubkey.as_slice()) {
         debug!(
-            "Matched account update {} in slot {}",
+            "Matched account update {} lamports {} in slot {}",
             Pubkey::new_from_array(key),
+            event.lamports,
             event.slot
         );
     }
@@ -130,14 +131,14 @@ fn should_publish_subscribed_account(
 }
 
 fn log_ignore_account_update(pubkey: &[u8]) {
-    if log_enabled!(::log::Level::Trace)
-        && let Ok(key) = <&[u8; 32]>::try_from(pubkey)
-    {
-        trace!(
-            "Ignoring update for account key: {:?}",
-            Pubkey::new_from_array(*key)
-        );
-        return;
+    if log_enabled!(::log::Level::Trace) {
+        if let Ok(key) = <&[u8; 32]>::try_from(pubkey) {
+            trace!(
+                "Ignoring update for account key: {:?}",
+                Pubkey::new_from_array(*key)
+            );
+            return;
+        }
     }
     if log_enabled!(::log::Level::Trace) {
         trace!("Ignoring update for account key bytes: {:?}", pubkey);
@@ -147,8 +148,8 @@ fn log_ignore_account_update(pubkey: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccountUpdatePublishOutcome, should_publish_backfill_account,
-        should_publish_confirmed_account,
+        should_publish_backfill_account, should_publish_confirmed_account,
+        AccountUpdatePublishOutcome,
     };
     use crate::{
         server::subscriptions::AccountSubscriptions, wire::UpdateAccountEvent,
