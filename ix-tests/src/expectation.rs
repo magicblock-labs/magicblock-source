@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
+use tracing::*;
 
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 use tokio::time::sleep;
 
 use crate::client::TestGrpcClient;
@@ -52,33 +53,89 @@ pub struct CheckpointRunner {
 #[allow(dead_code)]
 impl ExpectedUpdate {
     pub fn matches(&self, observed: &ObservedUpdate) -> bool {
-        self.pubkey_b58
-            .as_ref()
-            .is_none_or(|expected| observed.pubkey_b58 == *expected)
-            && self.slot.is_none_or(|expected| observed.slot == expected)
-            && self
-                .lamports
-                .is_none_or(|expected| observed.lamports == expected)
-            && self
-                .owner_b58
-                .as_ref()
-                .is_none_or(|expected| observed.owner_b58 == *expected)
-            && self
-                .executable
-                .is_none_or(|expected| observed.executable == expected)
-            && self
-                .rent_epoch
-                .is_none_or(|expected| observed.rent_epoch == expected)
-            && self
-                .write_version
-                .is_none_or(|expected| observed.write_version == expected)
-            && self.txn_signature_b58.as_ref().is_none_or(|expected| {
-                observed.txn_signature_b58.as_ref() == expected.as_ref()
-            })
-            && self
-                .data
-                .as_ref()
-                .is_none_or(|expected| observed.data == *expected)
+        let mut mismatches = Vec::new();
+        if let Some(expected) = &self.pubkey_b58 {
+            if observed.pubkey_b58 != *expected {
+                mismatches.push(format!(
+                    "pubkey_b58: expected {}, got {}",
+                    expected, observed.pubkey_b58
+                ));
+            }
+        }
+        if let Some(expected) = self.slot {
+            if observed.slot != expected {
+                mismatches.push(format!(
+                    "slot: expected {}, got {}",
+                    expected, observed.slot
+                ));
+            }
+        }
+        if let Some(expected) = self.lamports {
+            if observed.lamports != expected {
+                mismatches.push(format!(
+                    "lamports: expected {}, got {}",
+                    expected, observed.lamports
+                ));
+            }
+        }
+        if let Some(expected) = &self.owner_b58 {
+            if observed.owner_b58 != *expected {
+                mismatches.push(format!(
+                    "owner_b58: expected {}, got {}",
+                    expected, observed.owner_b58
+                ));
+            }
+        }
+
+        if let Some(expected) = self.executable {
+            if observed.executable != expected {
+                mismatches.push(format!(
+                    "executable: expected {}, got {}",
+                    expected, observed.executable
+                ));
+            }
+        }
+
+        if let Some(expected) = self.rent_epoch {
+            if observed.rent_epoch != expected {
+                mismatches.push(format!(
+                    "rent_epoch: expected {}, got {}",
+                    expected, observed.rent_epoch
+                ));
+            }
+        }
+
+        if let Some(expected) = self.write_version {
+            if observed.write_version != expected {
+                mismatches.push(format!(
+                    "write_version: expected {}, got {}",
+                    expected, observed.write_version
+                ));
+            }
+        }
+
+        if let Some(expected) = &self.txn_signature_b58 {
+            if observed.txn_signature_b58.as_ref() != expected.as_ref() {
+                mismatches.push(format!(
+                    "txn_signature_b58: expected {:?}, got {:?}",
+                    expected, observed.txn_signature_b58
+                ));
+            }
+        }
+
+        if let Some(expected) = &self.data {
+            if observed.data != *expected {
+                mismatches.push(format!(
+                    "data: expected {:?}, got {:?}",
+                    expected, observed.data
+                ));
+            }
+        }
+
+        if !mismatches.is_empty() {
+            warn!("Mismatches:\n {}", mismatches.join("\n  "));
+        }
+        return mismatches.is_empty();
     }
 }
 
@@ -128,6 +185,8 @@ impl CheckpointRunner {
                         .iter()
                         .any(|expected| expected.matches(update))
                 }) {
+                    error!("Expected one of: {:#?}", client_spec.allowed);
+                    error!("Got: {unexpected:#?}");
                     bail!(
                         "checkpoint '{}' failed for client {}: unexpected update for pubkey {}",
                         spec.name,

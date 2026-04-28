@@ -1,5 +1,6 @@
 use anyhow::Context;
 use solana_pubkey::Pubkey;
+use tracing::debug;
 
 use crate::accounts::NamedAccount;
 use crate::client::TestGrpcClient;
@@ -65,56 +66,72 @@ async fn run_inner(
         clients.push(client);
     }
 
+    let simple_a = ctx.accounts.pubkey(NamedAccount::SimpleA);
+    debug!("Client 0 subscribing to SimpleA: {simple_a}");
     clients[0]
-        .replace_subscription(&[ctx.accounts.pubkey_b58(NamedAccount::SimpleA)])
-        .await?;
-    clients[1]
-        .replace_subscription(&[ctx.accounts.pubkey_b58(NamedAccount::SimpleB)])
-        .await?;
-    clients[2]
-        .replace_subscription(&[ctx.accounts.pubkey_b58(NamedAccount::SimpleC)])
-        .await?;
-    clients[3]
-        .replace_subscription(&[ctx
-            .accounts
-            .pubkey_b58(NamedAccount::OwnerData)])
+        .replace_subscription(&[simple_a.to_string()])
         .await?;
 
+    let simple_b = ctx.accounts.pubkey(NamedAccount::SimpleB);
+    debug!("Client 1 subscribing to SimpleB: {simple_b}");
+    clients[1]
+        .replace_subscription(&[simple_b.to_string()])
+        .await?;
+
+    let simple_c = ctx.accounts.pubkey(NamedAccount::SimpleC);
+    debug!("Client 2 subscribing to SimpleC: {simple_c}");
+    clients[2]
+        .replace_subscription(&[simple_c.to_string()])
+        .await?;
+
+    let owner_data = ctx.accounts.pubkey(NamedAccount::OwnerData);
+    debug!("Client 3 subscribing to OwnerData: {owner_data}");
+    clients[3]
+        .replace_subscription(&[owner_data.to_string()])
+        .await?;
+
+    // Right after we made the subscriptions we expect to get an _empty_ account update for
+    // each account
+    let empty_checkpoint = CheckpointSpec {
+        name: "initial-empty-accounts",
+        clients: vec![
+            lamport_client_checkpoint(0, simple_a.to_string(), 0, None),
+            lamport_client_checkpoint(1, simple_b.to_string(), 0, None),
+            lamport_client_checkpoint(2, simple_c.to_string(), 0, None),
+        ],
+    };
+    ctx.checkpoint_runner
+        .wait_until_satisfied(&empty_checkpoint, clients, cursors)
+        .await?;
+
+    // Then we airdrop some lamports to each account and expect to see the updates with the
+    // correct lamports and signatures
     ctx.validator.fund_payer().await?;
 
-    let simple_a_sig = ctx
-        .validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::SimpleA), 1_000_000)
-        .await?;
-    let simple_b_sig = ctx
-        .validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::SimpleB), 2_000_000)
-        .await?;
-    let simple_c_sig = ctx
-        .validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::SimpleC), 3_000_000)
-        .await?;
+    let simple_a_sig = ctx.validator.airdrop(&simple_a, 1_000_000).await?;
+    let simple_b_sig = ctx.validator.airdrop(&simple_b, 2_000_000).await?;
+    let simple_c_sig = ctx.validator.airdrop(&simple_c, 3_000_000).await?;
 
     let basic_checkpoint = CheckpointSpec {
         name: "basic-lamports",
         clients: vec![
             lamport_client_checkpoint(
                 0,
-                ctx.accounts.pubkey_b58(NamedAccount::SimpleA),
+                simple_a.to_string(),
                 1_000_000,
-                simple_a_sig,
+                Some(simple_a_sig),
             ),
             lamport_client_checkpoint(
                 1,
-                ctx.accounts.pubkey_b58(NamedAccount::SimpleB),
+                simple_b.to_string(),
                 2_000_000,
-                simple_b_sig,
+                Some(simple_b_sig),
             ),
             lamport_client_checkpoint(
                 2,
-                ctx.accounts.pubkey_b58(NamedAccount::SimpleC),
+                simple_c.to_string(),
                 3_000_000,
-                simple_c_sig,
+                Some(simple_c_sig),
             ),
         ],
     };
@@ -124,9 +141,7 @@ async fn run_inner(
 
     let rent_lamports =
         ctx.validator.rent_exempt_balance(OWNER_DATA_SPACE).await?;
-    ctx.validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::OwnerData), rent_lamports)
-        .await?;
+    ctx.validator.airdrop(&owner_data, rent_lamports).await?;
 
     let synthetic_owner = Pubkey::new_from_array(SYNTHETIC_OWNER_BYTES);
     let owner_data_sig = ctx
@@ -139,7 +154,7 @@ async fn run_inner(
         .await?;
 
     let owner_data_expected = ExpectedUpdate {
-        pubkey_b58: Some(ctx.accounts.pubkey_b58(NamedAccount::OwnerData)),
+        pubkey_b58: Some(owner_data.to_string()),
         owner_b58: Some(synthetic_owner.to_string()),
         txn_signature_b58: Some(Some(owner_data_sig)),
         data: None,
@@ -162,12 +177,12 @@ fn lamport_client_checkpoint(
     client_id: usize,
     pubkey_b58: String,
     lamports: u64,
-    txn_signature_b58: String,
+    txn_signature_b58: Option<String>,
 ) -> ClientCheckpoint {
     let expected = ExpectedUpdate {
         pubkey_b58: Some(pubkey_b58),
         lamports: Some(lamports),
-        txn_signature_b58: Some(Some(txn_signature_b58)),
+        txn_signature_b58: Some(txn_signature_b58),
         ..Default::default()
     };
     ClientCheckpoint {

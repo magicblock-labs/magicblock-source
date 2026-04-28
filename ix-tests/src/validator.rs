@@ -3,7 +3,9 @@ use std::time::Duration;
 use anyhow::Context;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_rpc_client::{
+    api::config::CommitmentConfig, nonblocking::rpc_client::RpcClient,
+};
 use solana_signer::Signer;
 use solana_system_interface::instruction as system_instruction;
 use solana_transaction::Transaction;
@@ -19,7 +21,10 @@ pub struct ValidatorDriver {
 
 impl ValidatorDriver {
     pub fn new(config: &SuiteConfig) -> Self {
-        let rpc = RpcClient::new(config.validator_rpc_url.clone());
+        let rpc = RpcClient::new_with_commitment(
+            config.validator_rpc_url.clone(),
+            CommitmentConfig::confirmed(),
+        );
         let payer = Keypair::new();
         let transaction_timeout =
             Duration::from_millis(config.transaction_timeout_ms);
@@ -32,12 +37,10 @@ impl ValidatorDriver {
 
     pub async fn fund_payer(&self) -> anyhow::Result<()> {
         let lamports = 10_000_000_000; // 10 SOL
-        let sig = self
-            .rpc
+        self.rpc
             .request_airdrop(&self.payer.pubkey(), lamports)
             .await
             .context("fund_payer: request_airdrop failed")?;
-        self.confirm_signature(&sig).await?;
         info!(
             payer = %self.payer.pubkey(),
             lamports,

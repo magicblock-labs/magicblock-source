@@ -30,6 +30,9 @@ fn init_tracing() {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "ix_tests=info".into()),
         )
+        .without_time()
+        .with_file(true)
+        .with_line_number(true)
         .with_target(false)
         .init();
 }

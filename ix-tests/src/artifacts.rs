@@ -44,7 +44,6 @@ impl RunArtifacts {
         })
     }
 
-    #[allow(dead_code)]
     pub fn service_logs(&self, instance: ServiceInstance) -> ServiceLogPaths {
         let label = match instance {
             ServiceInstance::One => "service-1",
@@ -54,6 +53,31 @@ impl RunArtifacts {
             stdout: self.run_dir.join(format!("{label}.stdout.log")),
             stderr: self.run_dir.join(format!("{label}.stderr.log")),
         }
+    }
+
+    pub fn dump_service_logs_at(paths: &ServiceLogPaths) -> anyhow::Result<()> {
+        for path in &[&paths.stdout, &paths.stderr] {
+            if path.exists() {
+                let content =
+                    std::fs::read_to_string(path).with_context(|| {
+                        format!(
+                            "failed to read service log: {}",
+                            path.display()
+                        )
+                    })?;
+                println!("--- {} ---\n{}", path.display(), content);
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn dump_service_logs(
+        &self,
+        instance: ServiceInstance,
+    ) -> anyhow::Result<()> {
+        let paths = self.service_logs(instance);
+        Self::dump_service_logs_at(&paths)
     }
 
     #[allow(dead_code)]

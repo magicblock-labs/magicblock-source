@@ -5,7 +5,7 @@ use anyhow::{Context, bail};
 use helius_laserstream::grpc::PingRequest;
 use helius_laserstream::grpc::geyser_client::GeyserClient;
 use tokio::process::Command;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::artifacts::RunArtifacts;
 use crate::config::SuiteConfig;
@@ -146,13 +146,24 @@ impl ServiceController {
         loop {
             if let Ok(mut client) =
                 GeyserClient::connect(endpoint.to_owned()).await
-                && client.ping(PingRequest { count: 1 }).await.is_ok()
+                && client
+                    .ping(PingRequest { count: 1 })
+                    .await
+                    .inspect_err(|err| {
+                        warn!(
+                            "failed to ping grpc-service at {}: {err}",
+                            endpoint
+                        )
+                    })
+                    .is_ok()
             {
                 info!(endpoint, "grpc-service is ready");
                 return Ok(());
             }
 
             if tokio::time::Instant::now() >= deadline {
+                RunArtifacts::dump_service_logs_at(log_paths)
+                    .context("failed to dump service logs")?;
                 bail!(
                     "grpc-service at {} did not become ready within {:?}\n\
                      stdout: {}\n\

@@ -1,4 +1,4 @@
 {
-  "libpath": "../target/release/libsolana_accountsdb_plugin_kafka.so",
+  "libpath": "path-to-plugin-library",
   "config_file": "plugin-config.toml"
 }
