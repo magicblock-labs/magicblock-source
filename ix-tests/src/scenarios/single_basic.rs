@@ -98,11 +98,14 @@ async fn run_inner(
             lamport_client_checkpoint(0, simple_a.to_string(), 0, None),
             lamport_client_checkpoint(1, simple_b.to_string(), 0, None),
             lamport_client_checkpoint(2, simple_c.to_string(), 0, None),
+            lamport_client_checkpoint(3, owner_data.to_string(), 0, None),
         ],
     };
     ctx.checkpoint_runner
         .wait_until_satisfied(&empty_checkpoint, clients, cursors)
         .await?;
+
+    debug!("✅ initial empty accounts");
 
     // Then we airdrop some lamports to each account and expect to see the updates with the
     // correct lamports and signatures
@@ -139,6 +142,8 @@ async fn run_inner(
         .wait_until_satisfied(&basic_checkpoint, clients, cursors)
         .await?;
 
+    debug!("✅ basic lamports updates");
+
     let rent_lamports =
         ctx.validator.rent_exempt_balance(OWNER_DATA_SPACE).await?;
     ctx.validator.airdrop(&owner_data, rent_lamports).await?;
@@ -170,7 +175,11 @@ async fn run_inner(
     };
     ctx.checkpoint_runner
         .wait_until_satisfied(&owner_data_checkpoint, clients, cursors)
-        .await
+        .await?;
+
+    debug!("✅ owner and data updates");
+
+    Ok(())
 }
 
 fn lamport_client_checkpoint(

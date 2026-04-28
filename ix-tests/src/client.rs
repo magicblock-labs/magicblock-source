@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use tracing::*;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
@@ -7,6 +8,8 @@ use helius_laserstream::grpc::subscribe_update::UpdateOneof;
 use helius_laserstream::grpc::{
     SubscribeRequest, SubscribeRequestFilterAccounts,
 };
+use solana_keypair::Signature;
+use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
@@ -51,6 +54,35 @@ impl TestGrpcClient {
         let log = ClientLog::new();
         let log_clone = log.clone();
 
+        fn pubkey_str(bytes: &[u8]) -> String {
+            if bytes.is_empty() {
+                return String::new();
+            }
+            Pubkey::try_from(bytes.to_vec())
+                .inspect_err(|err| {
+                    error!(
+                        bytes = ?bytes,
+                        err = ?err,
+                        "failed to parse pubkey"
+                    )
+                })
+                .unwrap().to_string()
+        }
+        fn txn_signature_str(bytes: &[u8]) -> String {
+            if bytes.is_empty() {
+                return String::new();
+            }
+            Signature::try_from(bytes.to_vec())
+                .inspect_err(|err| {
+                    error!(
+                        bytes = ?bytes,
+                        err = ?err,
+                        "failed to parse txn signature"
+                    )
+                })
+                .unwrap().to_string()
+        }
+
         let receive_task = tokio::spawn(async move {
             while let Some(item) = update_stream.next().await {
                 match item {
@@ -67,22 +99,34 @@ impl TestGrpcClient {
                             let observed = ObservedUpdate {
                                 client_id: id,
                                 service,
-                                pubkey_b58: bs58::encode(&info.pubkey)
-                                    .into_string(),
+                                pubkey_b58: pubkey_str(&info.pubkey),
                                 slot: account_update.slot,
                                 lamports: info.lamports,
-                                owner_b58: bs58::encode(&info.owner)
-                                    .into_string(),
+                                owner_b58: pubkey_str(&info.owner),
                                 executable: info.executable,
                                 rent_epoch: info.rent_epoch,
                                 write_version: info.write_version,
                                 txn_signature_b58: info
                                     .txn_signature
                                     .as_ref()
-                                    .map(|b| bs58::encode(b).into_string()),
+                                    .map(|x| txn_signature_str(x)),
                                 data: info.data,
                                 received_at_millis: now,
                             };
+
+                            trace!(
+                                client_id = id,
+                                pubkey = %observed.pubkey_b58,
+                                slot = observed.slot,
+                                lamports = observed.lamports,
+                                owner = %observed.owner_b58,
+                                executable = observed.executable,
+                                rent_epoch = observed.rent_epoch,
+                                write_version = observed.write_version,
+                                txn_signature = ?observed.txn_signature_b58.as_deref(),
+                                data_len = observed.data.len(),
+                                "received account update"
+                            );
 
                             log_clone.push(observed);
                         }
