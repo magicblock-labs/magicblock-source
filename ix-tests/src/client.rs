@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use tracing::*;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::*;
 
 use anyhow::Context;
 use helius_laserstream::grpc::geyser_client::GeyserClient;
@@ -66,7 +66,8 @@ impl TestGrpcClient {
                         "failed to parse pubkey"
                     )
                 })
-                .unwrap().to_string()
+                .unwrap()
+                .to_string()
         }
         fn txn_signature_str(bytes: &[u8]) -> String {
             if bytes.is_empty() {
@@ -80,7 +81,8 @@ impl TestGrpcClient {
                         "failed to parse txn signature"
                     )
                 })
-                .unwrap().to_string()
+                .unwrap()
+                .to_string()
         }
 
         let receive_task = tokio::spawn(async move {
