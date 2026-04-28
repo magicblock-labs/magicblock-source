@@ -1,6 +1,6 @@
 DC := $(shell if command -v docker-compose >/dev/null 2>&1; then echo docker-compose; else echo docker compose; fi)
 
-.PHONY: help up down setup-stream create-table register-schema ready ui ui-down
+.PHONY: help up down setup-stream create-table register-schema ready reset-state ui ui-down
 
 help:
 	@echo "Available targets:"
@@ -10,6 +10,7 @@ help:
 	@echo "  create-table    - Create the accounts table (latest update per pubkey)"
 	@echo "  register-schema - Register the protobuf schema for Redpanda Console"
 	@echo "  ready           - Start stack, setup stream/table, and register schema"
+	@echo "  reset-state     - Rebuild Kafka + ksqlDB state for an already-running stack"
 	@echo "  ui              - Start Redpanda Console UI (http://localhost:8080)"
 	@echo "  ui-down         - Stop Redpanda Console"
 
@@ -29,6 +30,9 @@ create-table:
 	sh/ksql/02_create-accounts-table.sh
 
 ready: up setup-stream create-table register-schema
+
+reset-state:
+	sh/reset-state.sh
 
 ui:
 	$(DC) up -d redpanda-console
