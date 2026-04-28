@@ -3,9 +3,7 @@ use anyhow::Context;
 use crate::accounts::NamedAccount;
 use crate::client::TestGrpcClient;
 use crate::context::ScenarioContext;
-use crate::expectation::{
-    CheckpointSpec, ClientCheckpoint, ClientCursor, ExpectedUpdate,
-};
+use crate::expectation::{CheckpointSpec, ClientCheckpoint, ExpectedUpdate};
 use crate::layout::ServiceInstance;
 use crate::scenarios::ScenarioFailure;
 use crate::service::{ManagedService, ServiceSpec};
@@ -15,17 +13,9 @@ pub async fn run(ctx: &ScenarioContext) -> Result<(), ScenarioFailure> {
     let spec_two = ServiceSpec::for_instance(ServiceInstance::Two);
     let mut services = Vec::new();
     let mut clients = Vec::new();
-    let mut cursors = Vec::new();
 
-    let result = run_inner(
-        ctx,
-        &spec_one,
-        &spec_two,
-        &mut services,
-        &mut clients,
-        &mut cursors,
-    )
-    .await;
+    let result =
+        run_inner(ctx, &spec_one, &spec_two, &mut services, &mut clients).await;
     if let Err(error) = result {
         return Err(ScenarioFailure { error, clients });
     }
@@ -45,7 +35,6 @@ async fn run_inner(
     spec_two: &ServiceSpec,
     services: &mut Vec<ManagedService>,
     clients: &mut Vec<TestGrpcClient>,
-    cursors: &mut Vec<ClientCursor>,
 ) -> anyhow::Result<()> {
     services.push(
         ctx.service_controller
@@ -79,10 +68,6 @@ async fn run_inner(
         };
         client.replace_subscription(&subscription).await?;
         clients.push(client);
-        cursors.push(ClientCursor {
-            client_id: id,
-            next_index: 0,
-        });
     }
 
     for id in 10..20 {
@@ -102,10 +87,6 @@ async fn run_inner(
         };
         client.replace_subscription(&subscription).await?;
         clients.push(client);
-        cursors.push(ClientCursor {
-            client_id: id,
-            next_index: 0,
-        });
     }
 
     ctx.validator.fund_payer().await?;
@@ -170,10 +151,10 @@ async fn run_inner(
 
     let checkpoint = CheckpointSpec {
         name: "dual-concurrent-routing",
-        clients: checkpoint_clients,
+        checkpoints: checkpoint_clients,
     };
     ctx.checkpoint_runner
-        .wait_until_satisfied(&checkpoint, clients, cursors)
+        .wait_until_satisfied(&checkpoint, clients)
         .await
 }
 

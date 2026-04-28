@@ -5,9 +5,7 @@ use tracing::debug;
 use crate::accounts::NamedAccount;
 use crate::client::TestGrpcClient;
 use crate::context::ScenarioContext;
-use crate::expectation::{
-    CheckpointSpec, ClientCheckpoint, ClientCursor, ExpectedUpdate,
-};
+use crate::expectation::{CheckpointSpec, ClientCheckpoint, ExpectedUpdate};
 use crate::layout::ServiceInstance;
 use crate::scenarios::ScenarioFailure;
 use crate::service::{ManagedService, ServiceSpec};
@@ -28,10 +26,8 @@ pub async fn run(ctx: &ScenarioContext) -> Result<(), ScenarioFailure> {
             .map_err(scenario_failure_without_clients)?,
     );
     let mut clients = Vec::new();
-    let mut cursors = Vec::new();
 
-    let result =
-        run_inner(ctx, &spec.endpoint, &mut clients, &mut cursors).await;
+    let result = run_inner(ctx, &spec.endpoint, &mut clients).await;
     if let Err(error) = result {
         return Err(ScenarioFailure { error, clients });
     }
@@ -49,7 +45,6 @@ async fn run_inner(
     ctx: &ScenarioContext,
     endpoint: &str,
     clients: &mut Vec<TestGrpcClient>,
-    cursors: &mut Vec<ClientCursor>,
 ) -> anyhow::Result<()> {
     for id in 0..4 {
         let client = TestGrpcClient::connect(
@@ -59,10 +54,6 @@ async fn run_inner(
         )
         .await
         .with_context(|| format!("failed to connect client {id}"))?;
-        cursors.push(ClientCursor {
-            client_id: id,
-            next_index: 0,
-        });
         clients.push(client);
     }
 
@@ -94,7 +85,7 @@ async fn run_inner(
     // each account
     let empty_checkpoint = CheckpointSpec {
         name: "initial-empty-accounts",
-        clients: vec![
+        checkpoints: vec![
             lamport_client_checkpoint(0, simple_a.to_string(), 0, None),
             lamport_client_checkpoint(1, simple_b.to_string(), 0, None),
             lamport_client_checkpoint(2, simple_c.to_string(), 0, None),
@@ -102,7 +93,7 @@ async fn run_inner(
         ],
     };
     ctx.checkpoint_runner
-        .wait_until_satisfied(&empty_checkpoint, clients, cursors)
+        .wait_until_satisfied(&empty_checkpoint, clients)
         .await?;
 
     debug!("✅ initial empty accounts");
@@ -117,7 +108,7 @@ async fn run_inner(
 
     let basic_checkpoint = CheckpointSpec {
         name: "basic-lamports",
-        clients: vec![
+        checkpoints: vec![
             lamport_client_checkpoint(
                 0,
                 simple_a.to_string(),
@@ -139,7 +130,7 @@ async fn run_inner(
         ],
     };
     ctx.checkpoint_runner
-        .wait_until_satisfied(&basic_checkpoint, clients, cursors)
+        .wait_until_satisfied(&basic_checkpoint, clients)
         .await?;
 
     debug!("✅ basic lamports updates");
@@ -167,13 +158,13 @@ async fn run_inner(
     };
     let owner_data_checkpoint = CheckpointSpec {
         name: "owner-data-change",
-        clients: vec![ClientCheckpoint {
+        checkpoints: vec![ClientCheckpoint {
             client_id: 3,
             required: vec![owner_data_expected],
         }],
     };
     ctx.checkpoint_runner
-        .wait_until_satisfied(&owner_data_checkpoint, clients, cursors)
+        .wait_until_satisfied(&owner_data_checkpoint, clients)
         .await?;
 
     debug!("✅ owner and data updates");

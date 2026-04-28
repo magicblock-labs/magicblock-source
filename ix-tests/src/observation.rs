@@ -47,6 +47,16 @@ impl ClientLog {
         guard[start_index..].to_vec()
     }
 
+    /// Takes the next update in the order it came in
+    /// Removes and returns it from the log
+    pub fn consume_next_update(&self) -> Option<ObservedUpdate> {
+        if self.entries.lock().unwrap().is_empty() {
+            None
+        } else {
+            Some(self.entries.lock().unwrap().remove(0))
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.entries.lock().unwrap().len()
     }

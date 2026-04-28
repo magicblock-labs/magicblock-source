@@ -3,9 +3,7 @@ use anyhow::Context;
 use crate::accounts::NamedAccount;
 use crate::client::TestGrpcClient;
 use crate::context::ScenarioContext;
-use crate::expectation::{
-    CheckpointSpec, ClientCheckpoint, ClientCursor, ExpectedUpdate,
-};
+use crate::expectation::{CheckpointSpec, ClientCheckpoint, ExpectedUpdate};
 use crate::layout::ServiceInstance;
 use crate::scenarios::ScenarioFailure;
 use crate::service::{ManagedService, ServiceSpec};
@@ -19,10 +17,8 @@ pub async fn run(ctx: &ScenarioContext) -> Result<(), ScenarioFailure> {
             .map_err(scenario_failure_without_clients)?,
     );
     let mut clients = Vec::new();
-    let mut cursors = Vec::new();
 
-    let result =
-        run_inner(ctx, &spec.endpoint, &mut clients, &mut cursors).await;
+    let result = run_inner(ctx, &spec.endpoint, &mut clients).await;
     if let Err(error) = result {
         return Err(ScenarioFailure { error, clients });
     }
@@ -40,7 +36,6 @@ async fn run_inner(
     ctx: &ScenarioContext,
     endpoint: &str,
     clients: &mut Vec<TestGrpcClient>,
-    cursors: &mut Vec<ClientCursor>,
 ) -> anyhow::Result<()> {
     let shared_a = ctx.accounts.pubkey_b58(NamedAccount::SharedA);
     let shared_b = ctx.accounts.pubkey_b58(NamedAccount::SharedB);
@@ -59,10 +54,6 @@ async fn run_inner(
             .with_context(|| {
                 format!("failed to set subscriptions for client {id}")
             })?;
-        cursors.push(ClientCursor {
-            client_id: id,
-            next_index: 0,
-        });
         clients.push(client);
     }
 
@@ -96,10 +87,10 @@ async fn run_inner(
         .collect();
     let checkpoint = CheckpointSpec {
         name: "single-load-fanout",
-        clients: client_specs,
+        checkpoints: client_specs,
     };
     ctx.checkpoint_runner
-        .wait_until_satisfied(&checkpoint, clients, cursors)
+        .wait_until_satisfied(&checkpoint, clients)
         .await
 }
 

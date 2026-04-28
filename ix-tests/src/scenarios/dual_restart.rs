@@ -1,11 +1,9 @@
-use anyhow::{Context, bail};
+use anyhow::{bail, Context};
 
 use crate::accounts::{NamedAccount, ScenarioAccounts};
 use crate::client::TestGrpcClient;
 use crate::context::ScenarioContext;
-use crate::expectation::{
-    CheckpointSpec, ClientCheckpoint, ClientCursor, ExpectedUpdate,
-};
+use crate::expectation::{CheckpointSpec, ClientCheckpoint, ExpectedUpdate};
 use crate::layout::ServiceInstance;
 use crate::observation::ClientLog;
 use crate::scenarios::ScenarioFailure;
@@ -27,7 +25,6 @@ pub async fn run(ctx: &ScenarioContext) -> Result<(), ScenarioFailure> {
             .map_err(scenario_failure_without_clients)?,
     );
     let mut active_clients = Vec::new();
-    let mut cursors = Vec::new();
 
     let result = run_inner(
         ctx,
@@ -35,7 +32,6 @@ pub async fn run(ctx: &ScenarioContext) -> Result<(), ScenarioFailure> {
         &spec_two,
         &mut service_one,
         &mut active_clients,
-        &mut cursors,
     )
     .await;
     if let Err(error) = result {
@@ -63,19 +59,16 @@ async fn run_inner(
     spec_two: &ServiceSpec,
     service_one: &mut Option<ManagedService>,
     active_clients: &mut Vec<TestGrpcClient>,
-    cursors: &mut Vec<ClientCursor>,
 ) -> anyhow::Result<()> {
     connect_service_one_clients(
         &ctx.accounts,
         active_clients,
-        cursors,
         &spec_one.endpoint,
     )
     .await?;
     connect_service_two_clients(
         &ctx.accounts,
         active_clients,
-        cursors,
         &spec_two.endpoint,
     )
     .await?;
@@ -97,7 +90,7 @@ async fn run_inner(
 
     let pre_restart = CheckpointSpec {
         name: "pre-restart",
-        clients: vec![
+        checkpoints: vec![
             repeated_checkpoint(
                 0..5,
                 expected_update(
@@ -136,11 +129,10 @@ async fn run_inner(
         .collect(),
     };
     ctx.checkpoint_runner
-        .wait_until_satisfied(&pre_restart, active_clients, cursors)
+        .wait_until_satisfied(&pre_restart, active_clients)
         .await?;
 
-    let parked_logs =
-        shutdown_service_one_clients(active_clients, cursors).await?;
+    let parked_logs = shutdown_service_one_clients(active_clients).await?;
     shutdown_service(&ctx.service_controller, service_one).await?;
 
     ctx.validator
@@ -155,7 +147,7 @@ async fn run_inner(
 
     let during_restart = CheckpointSpec {
         name: "during-restart",
-        clients: vec![
+        checkpoints: vec![
             empty_checkpoints(10..15),
             repeated_checkpoint(
                 15..20,
@@ -171,7 +163,7 @@ async fn run_inner(
         .collect(),
     };
     ctx.checkpoint_runner
-        .wait_until_satisfied(&during_restart, active_clients, cursors)
+        .wait_until_satisfied(&during_restart, active_clients)
         .await?;
 
     *service_one = Some(
@@ -182,7 +174,6 @@ async fn run_inner(
     connect_service_one_clients(
         &ctx.accounts,
         active_clients,
-        cursors,
         &spec_one.endpoint,
     )
     .await?;
@@ -198,7 +189,7 @@ async fn run_inner(
 
     let post_restart = CheckpointSpec {
         name: "post-restart",
-        clients: vec![
+        checkpoints: vec![
             repeated_checkpoint(
                 0..5,
                 expected_update(
@@ -230,14 +221,13 @@ async fn run_inner(
         .collect(),
     };
     ctx.checkpoint_runner
-        .wait_until_satisfied(&post_restart, active_clients, cursors)
+        .wait_until_satisfied(&post_restart, active_clients)
         .await
 }
 
 async fn connect_service_one_clients(
     accounts: &ScenarioAccounts,
     active_clients: &mut Vec<TestGrpcClient>,
-    cursors: &mut Vec<ClientCursor>,
     endpoint: &str,
 ) -> anyhow::Result<()> {
     for id in 0..10 {
@@ -260,7 +250,7 @@ async fn connect_service_one_clients(
             .map(|account| accounts.pubkey_b58(account))
             .collect::<Vec<_>>();
         client.replace_subscription(&pubkeys).await?;
-        upsert_client(active_clients, cursors, client);
+        upsert_client(active_clients, client);
     }
     Ok(())
 }
@@ -268,7 +258,6 @@ async fn connect_service_one_clients(
 async fn connect_service_two_clients(
     accounts: &ScenarioAccounts,
     active_clients: &mut Vec<TestGrpcClient>,
-    cursors: &mut Vec<ClientCursor>,
     endpoint: &str,
 ) -> anyhow::Result<()> {
     for id in 10..20 {
@@ -291,14 +280,13 @@ async fn connect_service_two_clients(
             .map(|account| accounts.pubkey_b58(account))
             .collect::<Vec<_>>();
         client.replace_subscription(&pubkeys).await?;
-        upsert_client(active_clients, cursors, client);
+        upsert_client(active_clients, client);
     }
     Ok(())
 }
 
 fn upsert_client(
     active_clients: &mut Vec<TestGrpcClient>,
-    cursors: &mut Vec<ClientCursor>,
     client: TestGrpcClient,
 ) {
     let client_id = client.id;
@@ -309,23 +297,10 @@ fn upsert_client(
     } else {
         active_clients.push(client);
     }
-
-    if let Some(cursor) = cursors
-        .iter_mut()
-        .find(|cursor| cursor.client_id == client_id)
-    {
-        cursor.next_index = 0;
-    } else {
-        cursors.push(ClientCursor {
-            client_id,
-            next_index: 0,
-        });
-    }
 }
 
 async fn shutdown_service_one_clients(
     active_clients: &mut Vec<TestGrpcClient>,
-    cursors: &mut Vec<ClientCursor>,
 ) -> anyhow::Result<Vec<ParkedClientLog>> {
     let mut parked = Vec::new();
     let mut remaining = Vec::new();
@@ -346,7 +321,6 @@ async fn shutdown_service_one_clients(
     }
 
     *active_clients = remaining;
-    cursors.retain(|cursor| cursor.client_id >= 10);
     Ok(parked)
 }
 
