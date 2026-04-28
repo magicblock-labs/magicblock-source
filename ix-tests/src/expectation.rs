@@ -131,7 +131,6 @@ impl ExpectedUpdate {
     }
 }
 
-
 #[allow(dead_code)]
 impl CheckpointRunner {
     pub fn new(config: &SuiteConfig) -> Self {
@@ -210,7 +209,7 @@ mod tests {
     use crate::layout::ServiceInstance;
     use crate::observation::ObservedUpdate;
 
-    use super::{ExpectedUpdate};
+    use super::ExpectedUpdate;
 
     fn observed_update() -> ObservedUpdate {
         ObservedUpdate {

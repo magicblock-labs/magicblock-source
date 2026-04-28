@@ -1,4 +1,4 @@
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 
 use crate::accounts::{NamedAccount, ScenarioAccounts};
 use crate::client::TestGrpcClient;

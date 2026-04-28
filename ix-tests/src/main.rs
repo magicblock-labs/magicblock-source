@@ -83,6 +83,8 @@ async fn main() -> anyhow::Result<()> {
                     ctx.artifacts
                         .write_client_updates(*scenario, &failure.clients)?;
                 }
+                ctx.artifacts
+                    .dump_service_logs(layout::ServiceInstance::One)?;
                 ctx.artifacts.persist_failure()?;
                 return Err(failure.error);
             }
