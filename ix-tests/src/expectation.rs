@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 use tracing::*;
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use tokio::time::sleep;
 
 use crate::client::TestGrpcClient;
@@ -26,6 +26,7 @@ pub struct ExpectedUpdate {
 #[allow(dead_code)]
 pub struct ClientCheckpoint {
     pub client_id: usize,
+    #[allow(dead_code)]
     pub allowed: Vec<ExpectedUpdate>,
     pub required: Vec<ExpectedUpdate>,
 }
@@ -135,8 +136,20 @@ impl ExpectedUpdate {
         if !mismatches.is_empty() {
             warn!("Mismatches:\n {}", mismatches.join("\n  "));
         }
-        return mismatches.is_empty();
+        mismatches.is_empty()
     }
+}
+
+fn unmatched_required<'a>(
+    required: &'a [ExpectedUpdate],
+    observed: &[ObservedUpdate],
+) -> Vec<&'a ExpectedUpdate> {
+    required
+        .iter()
+        .filter(|expected| {
+            !observed.iter().any(|update| expected.matches(update))
+        })
+        .collect()
 }
 
 #[allow(dead_code)]
@@ -179,27 +192,9 @@ impl CheckpointRunner {
                     })?;
                 let observed = client.log().snapshot_from(cursor.next_index);
 
-                if let Some(unexpected) = observed.iter().find(|update| {
-                    !client_spec
-                        .allowed
-                        .iter()
-                        .any(|expected| expected.matches(update))
-                }) {
-                    error!("Expected one of: {:#?}", client_spec.allowed);
-                    error!("Got: {unexpected:#?}");
-                    bail!(
-                        "checkpoint '{}' failed for client {}: unexpected update for pubkey {}",
-                        spec.name,
-                        client_spec.client_id,
-                        unexpected.pubkey_b58
-                    );
-                }
-
-                let missing_required =
-                    client_spec.required.iter().any(|expected| {
-                        !observed.iter().any(|update| expected.matches(update))
-                    });
-                if missing_required {
+                if !unmatched_required(&client_spec.required, &observed)
+                    .is_empty()
+                {
                     all_required_seen = false;
                 }
             }
@@ -221,6 +216,39 @@ impl CheckpointRunner {
             }
 
             if Instant::now() >= deadline {
+                // Build a useful diagnostic per client and bail.
+                for client_spec in &spec.clients {
+                    let Some(client) = clients
+                        .iter()
+                        .find(|client| client.id == client_spec.client_id)
+                    else {
+                        continue;
+                    };
+                    let Some(cursor) = cursors.iter().find(|cursor| {
+                        cursor.client_id == client_spec.client_id
+                    }) else {
+                        continue;
+                    };
+                    let observed =
+                        client.log().snapshot_from(cursor.next_index);
+                    let missing =
+                        unmatched_required(&client_spec.required, &observed);
+                    if missing.is_empty() {
+                        continue;
+                    }
+                    error!(
+                        checkpoint = spec.name,
+                        client_id = client_spec.client_id,
+                        "Missing required: {:#?}",
+                        missing
+                    );
+                    error!(
+                        checkpoint = spec.name,
+                        client_id = client_spec.client_id,
+                        "Observed in window: {:#?}",
+                        observed
+                    );
+                }
                 bail!(
                     "checkpoint '{}' timed out after {:?}",
                     spec.name,
@@ -238,7 +266,7 @@ mod tests {
     use crate::layout::ServiceInstance;
     use crate::observation::ObservedUpdate;
 
-    use super::ExpectedUpdate;
+    use super::{ExpectedUpdate, unmatched_required};
 
     fn observed_update() -> ObservedUpdate {
         ObservedUpdate {
@@ -252,6 +280,26 @@ mod tests {
             rent_epoch: 5,
             write_version: 6,
             txn_signature_b58: Some("sig".to_owned()),
+            data: vec![1, 2, 3],
+            received_at_millis: 123,
+        }
+    }
+
+    fn observed_with(
+        lamports: u64,
+        txn_signature_b58: Option<String>,
+    ) -> ObservedUpdate {
+        ObservedUpdate {
+            client_id: 7,
+            service: ServiceInstance::One,
+            pubkey_b58: "pubkey".to_owned(),
+            slot: 42,
+            lamports,
+            owner_b58: "owner".to_owned(),
+            executable: false,
+            rent_epoch: 5,
+            write_version: 6,
+            txn_signature_b58,
             data: vec![1, 2, 3],
             received_at_millis: 123,
         }
@@ -275,5 +323,36 @@ mod tests {
         };
 
         assert!(!expected.matches(&observed_update()));
+    }
+
+    #[test]
+    fn unmatched_required_returns_empty_when_all_required_match_with_noise() {
+        let noise = observed_with(0, None);
+        let matching = observed_with(1_000_000, Some("real-sig".to_owned()));
+        let observed = vec![noise, matching];
+
+        let required = vec![ExpectedUpdate {
+            lamports: Some(1_000_000),
+            txn_signature_b58: Some(Some("real-sig".to_owned())),
+            ..Default::default()
+        }];
+
+        assert!(unmatched_required(&required, &observed).is_empty());
+    }
+
+    #[test]
+    fn unmatched_required_reports_missing_when_required_never_arrives() {
+        let noise = observed_with(0, None);
+        let observed = vec![noise];
+
+        let required = vec![ExpectedUpdate {
+            lamports: Some(1_000_000),
+            ..Default::default()
+        }];
+
+        let missing = unmatched_required(&required, &observed);
+        assert!(!missing.is_empty());
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].lamports, Some(1_000_000));
     }
 }
