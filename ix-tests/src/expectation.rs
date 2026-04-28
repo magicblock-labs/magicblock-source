@@ -26,8 +26,6 @@ pub struct ExpectedUpdate {
 #[allow(dead_code)]
 pub struct ClientCheckpoint {
     pub client_id: usize,
-    #[allow(dead_code)]
-    pub allowed: Vec<ExpectedUpdate>,
     pub required: Vec<ExpectedUpdate>,
 }
 
@@ -55,83 +53,74 @@ pub struct CheckpointRunner {
 impl ExpectedUpdate {
     pub fn matches(&self, observed: &ObservedUpdate) -> bool {
         let mut mismatches = Vec::new();
-        if let Some(expected) = &self.pubkey_b58 {
-            if observed.pubkey_b58 != *expected {
+        if let Some(expected) = &self.pubkey_b58
+            && observed.pubkey_b58 != *expected {
                 mismatches.push(format!(
                     "pubkey_b58: expected {}, got {}",
                     expected, observed.pubkey_b58
                 ));
             }
-        }
-        if let Some(expected) = self.slot {
-            if observed.slot != expected {
+        if let Some(expected) = self.slot
+            && observed.slot != expected {
                 mismatches.push(format!(
                     "slot: expected {}, got {}",
                     expected, observed.slot
                 ));
             }
-        }
-        if let Some(expected) = self.lamports {
-            if observed.lamports != expected {
+        if let Some(expected) = self.lamports
+            && observed.lamports != expected {
                 mismatches.push(format!(
                     "lamports: expected {}, got {}",
                     expected, observed.lamports
                 ));
             }
-        }
-        if let Some(expected) = &self.owner_b58 {
-            if observed.owner_b58 != *expected {
+        if let Some(expected) = &self.owner_b58
+            && observed.owner_b58 != *expected {
                 mismatches.push(format!(
                     "owner_b58: expected {}, got {}",
                     expected, observed.owner_b58
                 ));
             }
-        }
 
-        if let Some(expected) = self.executable {
-            if observed.executable != expected {
+        if let Some(expected) = self.executable
+            && observed.executable != expected {
                 mismatches.push(format!(
                     "executable: expected {}, got {}",
                     expected, observed.executable
                 ));
             }
-        }
 
-        if let Some(expected) = self.rent_epoch {
-            if observed.rent_epoch != expected {
+        if let Some(expected) = self.rent_epoch
+            && observed.rent_epoch != expected {
                 mismatches.push(format!(
                     "rent_epoch: expected {}, got {}",
                     expected, observed.rent_epoch
                 ));
             }
-        }
 
-        if let Some(expected) = self.write_version {
-            if observed.write_version != expected {
+        if let Some(expected) = self.write_version
+            && observed.write_version != expected {
                 mismatches.push(format!(
                     "write_version: expected {}, got {}",
                     expected, observed.write_version
                 ));
             }
-        }
 
-        if let Some(expected) = &self.txn_signature_b58 {
-            if observed.txn_signature_b58.as_ref() != expected.as_ref() {
+        if let Some(expected) = &self.txn_signature_b58
+            && observed.txn_signature_b58.as_ref() != expected.as_ref() {
                 mismatches.push(format!(
                     "txn_signature_b58: expected {:?}, got {:?}",
                     expected, observed.txn_signature_b58
                 ));
             }
-        }
 
-        if let Some(expected) = &self.data {
-            if observed.data != *expected {
+        if let Some(expected) = &self.data
+            && observed.data != *expected {
                 mismatches.push(format!(
                     "data: expected {:?}, got {:?}",
                     expected, observed.data
                 ));
             }
-        }
 
         if !mismatches.is_empty() {
             warn!("Mismatches:\n {}", mismatches.join("\n  "));

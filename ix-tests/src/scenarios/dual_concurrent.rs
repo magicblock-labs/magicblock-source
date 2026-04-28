@@ -183,7 +183,6 @@ fn single_update_checkpoint(
 ) -> ClientCheckpoint {
     ClientCheckpoint {
         client_id,
-        allowed: vec![expected.clone()],
         required: vec![expected],
     }
 }

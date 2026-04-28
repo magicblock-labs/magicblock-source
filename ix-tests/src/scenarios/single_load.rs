@@ -91,7 +91,6 @@ async fn run_inner(
     let client_specs = (0..100)
         .map(|client_id| ClientCheckpoint {
             client_id,
-            allowed: expected_updates.clone(),
             required: expected_updates.clone(),
         })
         .collect();

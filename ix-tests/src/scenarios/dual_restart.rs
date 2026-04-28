@@ -384,7 +384,6 @@ fn repeated_checkpoint(
     range
         .map(|client_id| ClientCheckpoint {
             client_id,
-            allowed: vec![expected.clone()],
             required: vec![expected.clone()],
         })
         .collect()
@@ -394,7 +393,6 @@ fn empty_checkpoints(range: std::ops::Range<usize>) -> Vec<ClientCheckpoint> {
     range
         .map(|client_id| ClientCheckpoint {
             client_id,
-            allowed: Vec::new(),
             required: Vec::new(),
         })
         .collect()

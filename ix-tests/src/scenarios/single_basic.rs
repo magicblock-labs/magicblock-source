@@ -169,7 +169,6 @@ async fn run_inner(
         name: "owner-data-change",
         clients: vec![ClientCheckpoint {
             client_id: 3,
-            allowed: vec![owner_data_expected.clone()],
             required: vec![owner_data_expected],
         }],
     };
@@ -196,7 +195,6 @@ fn lamport_client_checkpoint(
     };
     ClientCheckpoint {
         client_id,
-        allowed: vec![expected.clone()],
         required: vec![expected],
     }
 }
