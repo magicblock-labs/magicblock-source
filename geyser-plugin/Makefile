@@ -1,5 +1,7 @@
 .PHONY: help build build-plugin launch init-config clean
 
+MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
 	PLUGIN_EXT := so
@@ -38,6 +40,7 @@ launch: build-plugin
 			exit 1; \
 		fi; \
 	fi
+	cd "$(MAKEFILE_DIR)" && \
 	solana-test-validator --log --reset --geyser-plugin-config "$(VALIDATOR_CONFIG)"
 
 init-config:
