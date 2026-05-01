@@ -189,6 +189,7 @@ mod tests {
             validator: ValidatorConfig {
                 accounts_filter_url: "http://localhost:3000/filters/accounts"
                     .to_owned(),
+                rpc_url: "http://localhost:8899".to_owned(),
             },
             grpc: GrpcConfig {
                 bind_host: "127.0.0.1".to_owned(),

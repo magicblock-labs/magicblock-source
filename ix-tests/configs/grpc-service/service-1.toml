@@ -10,6 +10,7 @@ table = "ACCOUNTS"
 
 [validator]
 accounts_filter_url = "http://localhost:3000/filters/accounts"
+rpc_url = "http://127.0.0.1:8899"
 
 [grpc]
 bind_host = "0.0.0.0"
