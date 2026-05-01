@@ -18,6 +18,7 @@ use tracing::{debug, info, warn};
 
 use super::convert::to_subscribe_update;
 use super::dispatcher::{DispatcherHandle, TargetedSendResult};
+use super::readiness::ServiceReadiness;
 use crate::domain::{AccountEvent, PubkeyFilter};
 use crate::traits::{SnapshotStore, ValidatorSubscriptions};
 
@@ -37,6 +38,7 @@ pub(crate) struct GrpcSubscriptionService<
     dispatcher: DispatcherHandle,
     snapshot_store: P,
     validator_subscriptions: V,
+    readiness: ServiceReadiness,
 }
 
 impl<
@@ -48,11 +50,13 @@ impl<
         dispatcher: DispatcherHandle,
         snapshot_store: P,
         validator_subscriptions: V,
+        readiness: ServiceReadiness,
     ) -> Self {
         Self {
             dispatcher,
             snapshot_store,
             validator_subscriptions,
+            readiness,
         }
     }
 
@@ -423,6 +427,10 @@ impl<
         &self,
         request: Request<PingRequest>,
     ) -> Result<Response<PongResponse>, Status> {
+        if !self.readiness.is_ready() {
+            debug!("ping rejected: service not ready");
+            return Err(Status::unavailable("service not ready"));
+        }
         Ok(Response::new(PongResponse {
             count: request.into_inner().count,
         }))
@@ -487,6 +495,7 @@ mod tests {
     use crate::domain::{AccountState, PubkeyFilter, bytes_to_base58};
     use crate::errors::{GeykagError, GeykagResult};
     use crate::grpc_service::dispatcher::DispatcherHandle;
+    use crate::grpc_service::readiness::ServiceReadiness;
     use crate::traits::{SnapshotStore, ValidatorSubscriptions};
 
     fn pubkey_bytes(byte: u8) -> [u8; 32] {
@@ -938,11 +947,36 @@ mod tests {
         let snapshot_store = MockSnapshotStore::new(HashMap::new());
         let validator = MockValidatorSubscriptions::succeed();
 
-        let service =
-            GrpcSubscriptionService::new(dispatcher, snapshot_store, validator);
+        let service = GrpcSubscriptionService::new(
+            dispatcher,
+            snapshot_store,
+            validator,
+            ServiceReadiness::ready_for_test(),
+        );
 
         let response =
             service.ping(Request::new(PingRequest { count: 0 })).await;
         assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_ping_returns_unavailable_when_not_ready() {
+        use tonic::Code;
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let snapshot_store = MockSnapshotStore::new(HashMap::new());
+        let validator = MockValidatorSubscriptions::succeed();
+
+        let service = GrpcSubscriptionService::new(
+            dispatcher,
+            snapshot_store,
+            validator,
+            ServiceReadiness::new(),
+        );
+
+        let response = service
+            .ping(Request::new(PingRequest { count: 0 }))
+            .await
+            .unwrap_err();
+        assert_eq!(response.code(), Code::Unavailable);
     }
 }
