@@ -121,7 +121,6 @@ impl GrpcServiceHandle {
         self.sink.clone()
     }
 
-    #[allow(dead_code)]
     pub fn readiness(&self) -> ServiceReadiness {
         self.readiness.clone()
     }

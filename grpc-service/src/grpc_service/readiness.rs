@@ -10,14 +10,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// to clients.
 #[derive(Clone, Debug, Default)]
 #[allow(dead_code)]
-pub(crate) struct ServiceReadiness {
+pub struct ServiceReadiness {
     inner: Arc<AtomicBool>,
 }
 
 impl ServiceReadiness {
     /// Construct a new readiness flag in the "not ready" state.
     #[allow(dead_code)]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             inner: Arc::new(AtomicBool::new(false)),
         }
@@ -26,7 +26,7 @@ impl ServiceReadiness {
     /// Test-only constructor that starts in the "ready" state. Used by
     /// unit tests that want to bypass the preflight gate.
     #[cfg(test)]
-    pub(crate) fn ready_for_test() -> Self {
+    pub fn ready_for_test() -> Self {
         Self {
             inner: Arc::new(AtomicBool::new(true)),
         }
@@ -34,13 +34,13 @@ impl ServiceReadiness {
 
     /// Flip the flag to `ready`. Idempotent; safe to call repeatedly.
     #[allow(dead_code)]
-    pub(crate) fn mark_ready(&self) {
+    pub fn mark_ready(&self) {
         self.inner.store(true, Ordering::Release);
     }
 
     /// Return whether the service has finished startup preflight.
     #[allow(dead_code)]
-    pub(crate) fn is_ready(&self) -> bool {
+    pub fn is_ready(&self) -> bool {
         self.inner.load(Ordering::Acquire)
     }
 }

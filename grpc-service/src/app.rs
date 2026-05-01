@@ -1,13 +1,17 @@
 use crate::config::Config;
 use crate::domain::AccountEvent;
 use crate::errors::GeykagResult;
-use crate::grpc_service::{GrpcService, GrpcServiceHandle, GrpcSink};
+use crate::grpc_service::{
+    GrpcService, GrpcServiceHandle, GrpcSink, ServiceReadiness,
+};
 use crate::kafka::KafkaAccountUpdateStream;
 use crate::ksql::KsqlAccountSnapshotClient;
 use crate::output::{ConsoleSink, TeeSink};
+use crate::preflight;
 use crate::traits::{
     AccountSink, AccountUpdateSource, SnapshotStore, StatusSink,
 };
+use std::time::Duration;
 
 pub struct App<
     P: SnapshotStore,
@@ -20,6 +24,7 @@ pub struct App<
     account_update_source: K,
     sink: A,
     status_sink: S,
+    readiness: ServiceReadiness,
 }
 
 impl
@@ -42,6 +47,7 @@ impl
             account_update_source,
             ConsoleSink::new(),
             ConsoleSink::new(),
+            ServiceReadiness::new(),
         ))
     }
 }
@@ -68,6 +74,7 @@ impl
             account_update_source,
             sink,
             ConsoleSink::new(),
+            grpc.readiness(),
         );
 
         Ok((app, grpc))
@@ -97,6 +104,7 @@ impl
             account_update_source,
             sink,
             ConsoleSink::new(),
+            grpc.readiness(),
         );
 
         Ok((app, grpc))
@@ -112,6 +120,7 @@ impl<P: SnapshotStore, K: AccountUpdateSource, A: AccountSink, S: StatusSink>
         account_update_source: K,
         sink: A,
         status_sink: S,
+        readiness: ServiceReadiness,
     ) -> Self {
         Self {
             config,
@@ -119,6 +128,7 @@ impl<P: SnapshotStore, K: AccountUpdateSource, A: AccountSink, S: StatusSink>
             account_update_source,
             sink,
             status_sink,
+            readiness,
         }
     }
 
@@ -145,6 +155,17 @@ impl<P: SnapshotStore, K: AccountUpdateSource, A: AccountSink, S: StatusSink>
             }
         }
 
+        // Startup preflight gates client-visible readiness.
+        if !self.readiness.is_ready() {
+            preflight::wait_for_dependencies(
+                &self.config,
+                Duration::from_secs(60),
+            )
+            .await?;
+            self.readiness.mark_ready();
+            tracing::info!("service marked as ready");
+        }
+
         self.account_update_source
             .run(self.config.pubkey_filter.as_ref(), |message| {
                 let event = AccountEvent::Live(message);
@@ -168,6 +189,7 @@ mod tests {
         bytes_to_base58,
     };
     use crate::errors::{GeykagError, GeykagResult};
+    use crate::grpc_service::ServiceReadiness;
     use crate::kafka::StreamMessage;
     use crate::traits::{
         AccountSink, AccountUpdateSource, SnapshotStore, StatusSink,
@@ -416,6 +438,7 @@ mod tests {
             update_source.clone(),
             sink.clone(),
             status_sink.clone(),
+            ServiceReadiness::ready_for_test(),
         );
 
         app.run().await.unwrap();
@@ -440,6 +463,7 @@ mod tests {
             update_source.clone(),
             RecordingSink::new(false, false),
             status_sink.clone(),
+            ServiceReadiness::ready_for_test(),
         );
 
         app.run().await.unwrap();
@@ -464,6 +488,7 @@ mod tests {
             update_source.clone(),
             RecordingSink::new(false, false),
             status_sink.clone(),
+            ServiceReadiness::ready_for_test(),
         );
 
         app.run().await.unwrap();
@@ -491,6 +516,7 @@ mod tests {
             update_source.clone(),
             RecordingSink::new(false, false),
             RecordingStatusSink::new(),
+            ServiceReadiness::ready_for_test(),
         );
 
         let error = app.run().await.unwrap_err();
@@ -511,6 +537,7 @@ mod tests {
             update_source.clone(),
             RecordingSink::new(true, false),
             RecordingStatusSink::new(),
+            ServiceReadiness::ready_for_test(),
         );
 
         let error = app.run().await.unwrap_err();
@@ -530,6 +557,7 @@ mod tests {
             update_source.clone(),
             RecordingSink::new(false, true),
             RecordingStatusSink::new(),
+            ServiceReadiness::ready_for_test(),
         );
 
         let error = app.run().await.unwrap_err();
@@ -549,6 +577,7 @@ mod tests {
             update_source.clone(),
             RecordingSink::new(false, false),
             RecordingStatusSink::new(),
+            ServiceReadiness::ready_for_test(),
         );
 
         let error = app.run().await.unwrap_err();
