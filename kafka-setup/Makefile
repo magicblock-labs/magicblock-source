@@ -1,3 +1,4 @@
+MAKEFILE_DIR=$(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 DC := $(shell if command -v docker-compose >/dev/null 2>&1; then echo docker-compose; else echo docker compose; fi)
 
 .PHONY: help up down setup-stream create-table register-schema ready reset-state ui ui-down
@@ -21,18 +22,18 @@ down:
 	$(DC) down -v
 
 register-schema:
-	sh/redpanda/01_register-proto-schema.sh
+	$(MAKEFILE_DIR)sh/redpanda/01_register-proto-schema.sh
 
 setup-stream:
-	sh/ksql/01_setup-streams.sh
+	$(MAKEFILE_DIR)sh/ksql/01_setup-streams.sh
 
 create-table:
-	sh/ksql/02_create-accounts-table.sh
+	$(MAKEFILE_DIR)sh/ksql/02_create-accounts-table.sh
 
 ready: up setup-stream create-table register-schema
 
 reset-state:
-	sh/reset-state.sh
+	$(MAKEFILE_DIR)sh/reset-state.sh
 
 ui:
 	$(DC) up -d redpanda-console

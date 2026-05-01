@@ -67,6 +67,9 @@ kafka-ui:
 kafka-ui-down:
 	$(MAKE) -C kafka-setup ui-down
 
+kafka-reset-state:
+	$(MAKE) -C kafka-setup reset-state
+
 ix-tests-build:
 	cargo build -p magigblock-grpc-service
 	cargo build -p ix-tests
