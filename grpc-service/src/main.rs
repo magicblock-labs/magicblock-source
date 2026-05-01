@@ -6,6 +6,7 @@ mod grpc_service;
 mod kafka;
 mod ksql;
 mod output;
+mod preflight;
 mod traits;
 
 use anyhow::Result;
