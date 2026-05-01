@@ -82,6 +82,18 @@ impl ServiceController {
         spec: &ServiceSpec,
         artifacts: &RunArtifacts,
     ) -> anyhow::Result<ServiceHandle> {
+        if self.probe_ready(&spec.endpoint).await {
+            info!(
+                endpoint = %spec.endpoint,
+                "harness is reusing an already-running external grpc-service"
+            );
+            return Ok(ServiceHandle {
+                instance: spec.instance,
+                endpoint: spec.endpoint.clone(),
+                ownership: ServiceOwnership::External,
+            });
+        }
+
         let log_paths = artifacts.service_logs(spec.instance);
 
         let stdout_file = std::fs::File::create(&log_paths.stdout)
@@ -150,11 +162,20 @@ impl ServiceController {
             ServiceOwnership::External => {
                 info!(
                     endpoint = %service.endpoint,
-                    "skipping shutdown for external grpc-service"
+                    "external grpc-service was left running intentionally"
                 );
             }
         }
         Ok(())
+    }
+
+    async fn probe_ready(&self, endpoint: &str) -> bool {
+        let Ok(mut client) = GeyserClient::connect(endpoint.to_owned()).await
+        else {
+            return false;
+        };
+
+        client.ping(PingRequest { count: 1 }).await.is_ok()
     }
 
     async fn wait_until_ready(
