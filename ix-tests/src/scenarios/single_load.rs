@@ -6,7 +6,7 @@ use crate::context::ScenarioContext;
 use crate::expectation::{CheckpointSpec, ClientCheckpoint, ExpectedUpdate};
 use crate::layout::ServiceInstance;
 use crate::scenarios::ScenarioFailure;
-use crate::service::{ManagedService, ServiceSpec};
+use crate::service::{ServiceHandle, ServiceSpec};
 
 pub async fn run(ctx: &ScenarioContext) -> Result<(), ScenarioFailure> {
     let spec = ServiceSpec::for_instance(ServiceInstance::One);
@@ -103,7 +103,7 @@ async fn shutdown_clients(clients: Vec<TestGrpcClient>) -> anyhow::Result<()> {
 
 async fn shutdown_service(
     controller: &crate::service::ServiceController,
-    service: &mut Option<ManagedService>,
+    service: &mut Option<ServiceHandle>,
 ) -> anyhow::Result<()> {
     if let Some(service) = service.take() {
         controller.shutdown(service).await?;

@@ -6,7 +6,7 @@ use crate::context::ScenarioContext;
 use crate::expectation::{CheckpointSpec, ClientCheckpoint, ExpectedUpdate};
 use crate::layout::ServiceInstance;
 use crate::scenarios::ScenarioFailure;
-use crate::service::{ManagedService, ServiceSpec};
+use crate::service::{ServiceHandle, ServiceSpec};
 
 pub async fn run(ctx: &ScenarioContext) -> Result<(), ScenarioFailure> {
     let spec_one = ServiceSpec::for_instance(ServiceInstance::One);
@@ -33,7 +33,7 @@ async fn run_inner(
     ctx: &ScenarioContext,
     spec_one: &ServiceSpec,
     spec_two: &ServiceSpec,
-    services: &mut Vec<ManagedService>,
+    services: &mut Vec<ServiceHandle>,
     clients: &mut Vec<TestGrpcClient>,
 ) -> anyhow::Result<()> {
     services.push(
@@ -177,7 +177,7 @@ async fn shutdown_clients(clients: Vec<TestGrpcClient>) -> anyhow::Result<()> {
 
 async fn shutdown_services(
     controller: &crate::service::ServiceController,
-    services: Vec<ManagedService>,
+    services: Vec<ServiceHandle>,
 ) -> anyhow::Result<()> {
     for service in services {
         controller.shutdown(service).await?;

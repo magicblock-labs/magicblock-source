@@ -12,10 +12,27 @@ use crate::config::SuiteConfig;
 use crate::layout::ServiceInstance;
 
 #[allow(dead_code)]
-pub struct ManagedService {
+pub enum ServiceOwnership {
+    Owned(tokio::process::Child),
+    External,
+}
+
+#[allow(dead_code)]
+pub struct ServiceHandle {
     pub instance: ServiceInstance,
     pub endpoint: String,
-    child: tokio::process::Child,
+    pub ownership: ServiceOwnership,
+}
+
+#[allow(dead_code)]
+impl ServiceHandle {
+    pub fn is_owned(&self) -> bool {
+        matches!(self.ownership, ServiceOwnership::Owned(_))
+    }
+
+    pub fn is_external(&self) -> bool {
+        matches!(self.ownership, ServiceOwnership::External)
+    }
 }
 
 pub struct ServiceController {
@@ -64,7 +81,7 @@ impl ServiceController {
         &self,
         spec: &ServiceSpec,
         artifacts: &RunArtifacts,
-    ) -> anyhow::Result<ManagedService> {
+    ) -> anyhow::Result<ServiceHandle> {
         let log_paths = artifacts.service_logs(spec.instance);
 
         let stdout_file = std::fs::File::create(&log_paths.stdout)
@@ -103,36 +120,40 @@ impl ServiceController {
                 )
             })?;
 
-        let managed = ManagedService {
+        let handle = ServiceHandle {
             instance: spec.instance,
             endpoint: spec.endpoint.clone(),
-            child,
+            ownership: ServiceOwnership::Owned(child),
         };
 
         self.wait_until_ready(&spec.endpoint, &log_paths).await?;
 
-        Ok(managed)
+        Ok(handle)
     }
 
-    pub async fn shutdown(
-        &self,
-        mut service: ManagedService,
-    ) -> anyhow::Result<()> {
-        info!(
-            endpoint = %service.endpoint,
-            "shutting down grpc-service"
-        );
-        service.child.start_kill().context("failed to send kill")?;
-        let status = service
-            .child
-            .wait()
-            .await
-            .context("failed to wait for child")?;
-        debug!(
-            endpoint = %service.endpoint,
-            status = %status,
-            "grpc-service exited"
-        );
+    pub async fn shutdown(&self, service: ServiceHandle) -> anyhow::Result<()> {
+        match service.ownership {
+            ServiceOwnership::Owned(mut child) => {
+                info!(
+                    endpoint = %service.endpoint,
+                    "shutting down grpc-service"
+                );
+                child.start_kill().context("failed to send kill")?;
+                let status =
+                    child.wait().await.context("failed to wait for child")?;
+                debug!(
+                    endpoint = %service.endpoint,
+                    status = %status,
+                    "grpc-service exited"
+                );
+            }
+            ServiceOwnership::External => {
+                info!(
+                    endpoint = %service.endpoint,
+                    "skipping shutdown for external grpc-service"
+                );
+            }
+        }
         Ok(())
     }
 
