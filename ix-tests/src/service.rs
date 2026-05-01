@@ -142,23 +142,46 @@ impl ServiceController {
         log_paths: &crate::artifacts::ServiceLogPaths,
     ) -> anyhow::Result<()> {
         let deadline = tokio::time::Instant::now() + self.service_start_timeout;
+        let mut announced_waiting = false;
 
         loop {
-            if let Ok(mut client) =
-                GeyserClient::connect(endpoint.to_owned()).await
-                && client
-                    .ping(PingRequest { count: 1 })
-                    .await
-                    .inspect_err(|err| {
-                        warn!(
-                            "failed to ping grpc-service at {}: {err}",
-                            endpoint
-                        )
-                    })
-                    .is_ok()
-            {
-                info!(endpoint, "grpc-service is ready");
-                return Ok(());
+            match GeyserClient::connect(endpoint.to_owned()).await {
+                Ok(mut client) => {
+                    match client.ping(PingRequest { count: 1 }).await {
+                        Ok(_) => {
+                            info!(endpoint, "grpc-service is ready");
+                            return Ok(());
+                        }
+                        Err(err) if err.code() == tonic::Code::Unavailable => {
+                            if !announced_waiting {
+                                info!(
+                                    endpoint,
+                                    message = %err.message(),
+                                    "grpc-service listening but not yet ready; waiting for startup preflight"
+                                );
+                                announced_waiting = true;
+                            } else {
+                                debug!(
+                                    endpoint,
+                                    message = %err.message(),
+                                    "grpc-service still preflight-pending"
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                endpoint,
+                                "ping returned non-readiness error: {err}"
+                            );
+                        }
+                    }
+                }
+                Err(err) => {
+                    debug!(
+                        endpoint,
+                        "grpc-service not yet accepting connections: {err}"
+                    );
+                }
             }
 
             if tokio::time::Instant::now() >= deadline {
