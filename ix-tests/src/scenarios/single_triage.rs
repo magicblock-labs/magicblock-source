@@ -1,6 +1,6 @@
 use anyhow::Context;
 use solana_keypair::{Keypair, Signer};
-use tracing::debug;
+use tracing::info;
 
 use crate::client::TestGrpcClient;
 use crate::context::ScenarioContext;
@@ -11,12 +11,25 @@ use crate::service::{ServiceHandle, ServiceSpec};
 
 pub async fn run(ctx: &ScenarioContext) -> Result<(), ScenarioFailure> {
     let spec = ServiceSpec::for_instance(ServiceInstance::One);
-    let mut service = Some(
-        ctx.service_controller
-            .start(&spec, &ctx.artifacts)
-            .await
-            .map_err(scenario_failure_without_clients)?,
-    );
+    let service = ctx
+        .service_controller
+        .start(&spec, &ctx.artifacts)
+        .await
+        .map_err(scenario_failure_without_clients)?;
+
+    if service.is_external() {
+        info!(
+            endpoint = %service.endpoint,
+            "single-triage attached to already-running external grpc-service"
+        );
+    } else {
+        info!(
+            endpoint = %service.endpoint,
+            "single-triage launched managed grpc-service"
+        );
+    }
+
+    let mut service = Some(service);
     let mut clients = Vec::new();
 
     let result = run_inner(ctx, &spec.endpoint, &mut clients).await;
@@ -38,6 +51,8 @@ async fn run_inner(
     endpoint: &str,
     clients: &mut Vec<TestGrpcClient>,
 ) -> anyhow::Result<()> {
+    info!(endpoint = %endpoint, "single-triage targeting endpoint");
+
     let client =
         TestGrpcClient::connect(0, ServiceInstance::One, endpoint.to_owned())
             .await
@@ -45,7 +60,7 @@ async fn run_inner(
     clients.push(client);
 
     let random_pubkey = Keypair::new().pubkey();
-    debug!("Client 0 subscribing to triage pubkey: {random_pubkey}");
+    info!(pubkey = %random_pubkey, "single-triage generated random pubkey");
     clients[0]
         .replace_subscription(&[random_pubkey.to_string()])
         .await?;
@@ -65,6 +80,10 @@ async fn run_inner(
     ctx.checkpoint_runner
         .wait_until_satisfied(&bootstrap_checkpoint, clients)
         .await?;
+    info!(
+        pubkey = %random_pubkey,
+        "single-triage bootstrap lamports=0 checkpoint passed"
+    );
 
     ctx.validator.fund_payer().await?;
 
@@ -85,7 +104,13 @@ async fn run_inner(
     };
     ctx.checkpoint_runner
         .wait_until_satisfied(&airdrop_checkpoint, clients)
-        .await
+        .await?;
+    info!(
+        pubkey = %random_pubkey,
+        "single-triage post-airdrop checkpoint passed"
+    );
+
+    Ok(())
 }
 
 async fn shutdown_clients(clients: Vec<TestGrpcClient>) -> anyhow::Result<()> {
