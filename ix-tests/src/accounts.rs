@@ -201,6 +201,7 @@ const BASE_SEEDS: [[u8; 32]; ACCOUNT_COUNT] = [
 fn scenario_xor_byte(scenario: ScenarioName) -> u8 {
     match scenario {
         ScenarioName::All => unreachable!("All is expanded before accounts"),
+        ScenarioName::SingleTriage => 0xEE,
         ScenarioName::SingleBasic => 0xAA,
         ScenarioName::SingleLoad => 0xBB,
         ScenarioName::DualConcurrent => 0xCC,

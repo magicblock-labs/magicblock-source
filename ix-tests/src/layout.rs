@@ -19,6 +19,10 @@ pub struct ScenarioLayout {
 impl ScenarioLayout {
     pub fn for_scenario(name: ScenarioName) -> Self {
         match name {
+            ScenarioName::SingleTriage => Self {
+                services: vec![ServiceInstance::One],
+                client_count: 1,
+            },
             ScenarioName::SingleBasic => Self {
                 services: vec![ServiceInstance::One],
                 client_count: 4,

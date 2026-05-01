@@ -1,5 +1,5 @@
 use anyhow::Context;
-use solana_keypair::Keypair;
+use solana_keypair::{Keypair, Signer};
 use tracing::debug;
 
 use crate::client::TestGrpcClient;
@@ -38,13 +38,10 @@ async fn run_inner(
     endpoint: &str,
     clients: &mut Vec<TestGrpcClient>,
 ) -> anyhow::Result<()> {
-    let client = TestGrpcClient::connect(
-        0,
-        ServiceInstance::One,
-        endpoint.to_owned(),
-    )
-    .await
-    .with_context(|| "failed to connect client 0")?;
+    let client =
+        TestGrpcClient::connect(0, ServiceInstance::One, endpoint.to_owned())
+            .await
+            .with_context(|| "failed to connect client 0")?;
     clients.push(client);
 
     let random_pubkey = Keypair::new().pubkey();
@@ -71,10 +68,8 @@ async fn run_inner(
 
     ctx.validator.fund_payer().await?;
 
-    let airdrop_signature = ctx
-        .validator
-        .airdrop(&random_pubkey, 1_000_000)
-        .await?;
+    let airdrop_signature =
+        ctx.validator.airdrop(&random_pubkey, 1_000_000).await?;
 
     let airdrop_checkpoint = CheckpointSpec {
         name: "single-triage-airdrop",

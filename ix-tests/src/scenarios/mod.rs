@@ -2,6 +2,7 @@ mod dual_concurrent;
 mod dual_restart;
 mod single_basic;
 mod single_load;
+mod single_triage;
 
 use anyhow::anyhow;
 
@@ -19,6 +20,7 @@ pub async fn run_scenario(
     ctx: &ScenarioContext,
 ) -> Result<(), ScenarioFailure> {
     match name {
+        ScenarioName::SingleTriage => single_triage::run(ctx).await,
         ScenarioName::SingleBasic => single_basic::run(ctx).await,
         ScenarioName::SingleLoad => single_load::run(ctx).await,
         ScenarioName::DualConcurrent => dual_concurrent::run(ctx).await,
