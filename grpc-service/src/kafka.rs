@@ -4,8 +4,9 @@ use magigblock_event_proto::{
 };
 use prost::Message;
 use rdkafka::Message as KafkaMessage;
+use rdkafka::client::ClientContext;
 use rdkafka::config::ClientConfig;
-use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::consumer::{Consumer, ConsumerContext, Rebalance, StreamConsumer};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
@@ -14,6 +15,50 @@ use crate::domain::{AccountUpdate, PubkeyFilter, bytes_to_base58};
 use crate::errors::{GeykagError, GeykagResult};
 use crate::grpc_service::ServiceReadiness;
 use crate::traits::AccountUpdateSource;
+
+struct ReadinessConsumerContext {
+    readiness: ServiceReadiness,
+    group_id: String,
+}
+
+impl ClientContext for ReadinessConsumerContext {}
+
+impl ConsumerContext for ReadinessConsumerContext {
+    fn post_rebalance(
+        &self,
+        _base_consumer: &rdkafka::consumer::BaseConsumer<Self>,
+        rebalance: &Rebalance<'_>,
+    ) {
+        match rebalance {
+            Rebalance::Assign(assignment) if assignment.count() > 0 => {
+                self.readiness.mark_kafka_ready();
+                info!(
+                    group_id = self.group_id,
+                    partition_count = assignment.count(),
+                    "Kafka consumer received partition assignment"
+                );
+            }
+            Rebalance::Assign(_) => {}
+            Rebalance::Revoke(partitions) => {
+                self.readiness.mark_kafka_not_ready();
+                info!(
+                    group_id = self.group_id,
+                    partition_count = partitions.count(),
+                    "Kafka consumer partitions revoked"
+                );
+            }
+            Rebalance::Error(err) => {
+                self.readiness.mark_kafka_not_ready();
+                warn!(
+                    group_id = self.group_id,
+                    error = %err,
+                    "Kafka consumer lost readiness during rebalance"
+                );
+            }
+        }
+    }
+}
+
 pub struct KafkaAccountUpdateStream {
     config: KafkaConfig,
     readiness: ServiceReadiness,
@@ -87,12 +132,14 @@ impl KafkaAccountUpdateStream {
             .set("auto.offset.reset", &self.config.auto_offset_reset)
             .set("enable.auto.commit", "true");
 
-        let consumer: StreamConsumer =
-            client_config.create().map_err(|source| {
-                GeykagError::KafkaConsumerCreate {
-                    broker: self.config.bootstrap_servers.clone(),
-                    source,
-                }
+        let consumer: StreamConsumer<ReadinessConsumerContext> = client_config
+            .create_with_context(ReadinessConsumerContext {
+                readiness: self.readiness.clone(),
+                group_id: self.config.group_id.clone(),
+            })
+            .map_err(|source| GeykagError::KafkaConsumerCreate {
+                broker: self.config.bootstrap_servers.clone(),
+                source,
             })?;
 
         consumer
@@ -112,7 +159,6 @@ impl KafkaAccountUpdateStream {
             "listening for Kafka messages"
         );
 
-        let _ = &self.readiness;
         let mut stream = consumer.stream();
         loop {
             tokio::select! {

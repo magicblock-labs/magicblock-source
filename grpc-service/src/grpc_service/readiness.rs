@@ -1,47 +1,58 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Shared startup-readiness flag for the gRPC service.
+#[derive(Debug, Default)]
+struct ServiceReadinessInner {
+    preflight_ready: AtomicBool,
+    kafka_ready: AtomicBool,
+}
+
+/// Shared startup-readiness state for the gRPC service.
 ///
-/// The service starts in the "not ready" state. Once startup
-/// preflight has verified all required dependencies, the owner of the
-/// state must call [`ServiceReadiness::mark_ready`]. The Ping handler
-/// reads the state to decide whether to advertise the service as ready
-/// to clients.
+/// The service starts in the "not ready" state. It becomes ready only
+/// after startup preflight has verified all required dependencies and
+/// the Kafka consumer has received a partition assignment.
 #[derive(Clone, Debug, Default)]
 #[allow(dead_code)]
 pub struct ServiceReadiness {
-    inner: Arc<AtomicBool>,
+    inner: Arc<ServiceReadinessInner>,
 }
 
 impl ServiceReadiness {
-    /// Construct a new readiness flag in the "not ready" state.
     #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(AtomicBool::new(false)),
+            inner: Arc::new(ServiceReadinessInner::default()),
         }
     }
 
-    /// Test-only constructor that starts in the "ready" state. Used by
-    /// unit tests that want to bypass the preflight gate.
     #[cfg(test)]
     pub fn ready_for_test() -> Self {
-        Self {
-            inner: Arc::new(AtomicBool::new(true)),
-        }
+        let readiness = Self::new();
+        readiness.mark_preflight_ready();
+        readiness.mark_kafka_ready();
+        readiness
     }
 
-    /// Flip the flag to `ready`. Idempotent; safe to call repeatedly.
     #[allow(dead_code)]
-    pub fn mark_ready(&self) {
-        self.inner.store(true, Ordering::Release);
+    pub fn mark_preflight_ready(&self) {
+        self.inner.preflight_ready.store(true, Ordering::Release);
     }
 
-    /// Return whether the service has finished startup preflight.
+    #[allow(dead_code)]
+    pub fn mark_kafka_ready(&self) {
+        self.inner.kafka_ready.store(true, Ordering::Release);
+    }
+
+    #[allow(dead_code)]
+    pub fn mark_kafka_not_ready(&self) {
+        self.inner.kafka_ready.store(false, Ordering::Release);
+    }
+
     #[allow(dead_code)]
     pub fn is_ready(&self) -> bool {
-        self.inner.load(Ordering::Acquire)
+        self.inner.preflight_ready.load(Ordering::Acquire)
+            && self.inner.kafka_ready.load(Ordering::Acquire)
     }
 }
 
@@ -56,19 +67,48 @@ mod tests {
     }
 
     #[test]
-    fn test_mark_ready_sets_flag() {
+    fn test_preflight_alone_does_not_make_service_ready() {
         let r = ServiceReadiness::new();
-        r.mark_ready();
+        r.mark_preflight_ready();
+        assert!(!r.is_ready());
+    }
+
+    #[test]
+    fn test_kafka_alone_does_not_make_service_ready() {
+        let r = ServiceReadiness::new();
+        r.mark_kafka_ready();
+        assert!(!r.is_ready());
+    }
+
+    #[test]
+    fn test_service_becomes_ready_only_after_both_flags() {
+        let r = ServiceReadiness::new();
+        r.mark_preflight_ready();
+        r.mark_kafka_ready();
         assert!(r.is_ready());
+    }
+
+    #[test]
+    fn test_mark_kafka_not_ready_clears_readiness() {
+        let r = ServiceReadiness::new();
+        r.mark_preflight_ready();
+        r.mark_kafka_ready();
+        assert!(r.is_ready());
+
+        r.mark_kafka_not_ready();
+        assert!(!r.is_ready());
     }
 
     #[test]
     fn test_clones_share_state() {
         let r = ServiceReadiness::new();
         let r2 = r.clone();
-        assert!(!r2.is_ready());
-        r.mark_ready();
+        r.mark_preflight_ready();
+        r.mark_kafka_ready();
         assert!(r2.is_ready());
+
+        r2.mark_kafka_not_ready();
+        assert!(!r.is_ready());
     }
 
     #[test]

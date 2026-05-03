@@ -186,11 +186,13 @@ impl<P: SnapshotStore, K: AccountUpdateSource, A: AccountSink, S: StatusSink>
                 Duration::from_secs(60),
             )
             .await?;
-            self.readiness.mark_ready();
-            tracing::info!("service marked as ready");
+            self.readiness.mark_preflight_ready();
+            tracing::info!(
+                "startup preflight complete; waiting for Kafka consumer assignment before advertising readiness"
+            );
         }
 
-        let _ = &self.shutdown;
+        let _shutdown = &self.shutdown;
         self.account_update_source
             .run(self.config.pubkey_filter.as_ref(), |message| {
                 let event = AccountEvent::Live(message);
