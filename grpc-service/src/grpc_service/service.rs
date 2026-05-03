@@ -105,6 +105,12 @@ async fn bootstrap_new_pubkeys_impl<
         // will publish one of two Kafka updates:
         // - the current account update if the account exists
         // - a MissingAccount update if the account does not exist
+        debug!(
+            client_id,
+            pubkey = %pubkey_b58,
+            "fetching snapshot bootstrap for pubkey"
+        );
+
         let snapshot = match snapshot_store.fetch_one_by_pubkey(&pubkey).await {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -143,7 +149,13 @@ async fn bootstrap_new_pubkeys_impl<
             };
 
         match dispatcher.send_to_client(client_id, update).await {
-            Ok(TargetedSendResult::Delivered) => {}
+            Ok(TargetedSendResult::Delivered) => {
+                info!(
+                    client_id,
+                    pubkey = %pubkey_b58,
+                    "snapshot bootstrap dispatched"
+                );
+            }
             Ok(TargetedSendResult::ClientNotFound) => {
                 warn!(
                     client_id,
@@ -187,7 +199,8 @@ async fn bootstrap_new_pubkeys_impl<
     info!(
         client_id,
         pubkey_count = pubkeys_to_whitelist.len(),
-        "whitelisting ksql-missing pubkeys with validator"
+        pubkeys = ?pubkeys_to_whitelist,
+        "validator whitelist request starting"
     );
 
     if let Err(error) = validator_subscriptions
@@ -199,6 +212,13 @@ async fn bootstrap_new_pubkeys_impl<
             pubkey_count = pubkeys_to_whitelist.len(),
             error = %error,
             "failed to whitelist pubkeys with validator"
+        );
+    } else {
+        info!(
+            client_id,
+            pubkey_count = pubkeys_to_whitelist.len(),
+            pubkeys = ?pubkeys_to_whitelist,
+            "validator whitelist request completed"
         );
     }
 }
@@ -264,6 +284,15 @@ fn parse_pubkey_list(accounts: &[String]) -> Result<HashSet<[u8; 32]>, Status> {
     Ok(set)
 }
 
+fn normalized_pubkeys(pubkeys: &HashSet<[u8; 32]>) -> Vec<String> {
+    let mut normalized = pubkeys
+        .iter()
+        .map(|pubkey| bs58::encode(pubkey).into_string())
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized
+}
+
 enum FilterOp {
     Replace(HashSet<[u8; 32]>),
     Patch {
@@ -313,9 +342,15 @@ impl<
             })?;
 
         let initial_filter = parse_accounts_filter(&first_req)?;
+        let initial_pubkeys = normalized_pubkeys(&initial_filter);
         info!(
             filter_size = initial_filter.len(),
-            "new gRPC subscriber connected"
+            pubkeys = tracing::field::debug(if initial_pubkeys.is_empty() {
+                None::<&Vec<String>>
+            } else {
+                Some(&initial_pubkeys)
+            }),
+            "gRPC subscribe request received"
         );
 
         // 2. Register with dispatcher using parsed filter

@@ -18,6 +18,7 @@ use crate::config::Config;
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();
+    tracing::info!("grpc-service process starting");
     let config = Config::load()?;
     let shutdown = CancellationToken::new();
     let (app, grpc_handle) =

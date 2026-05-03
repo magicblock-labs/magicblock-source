@@ -7,8 +7,9 @@ use rdkafka::Message as KafkaMessage;
 use rdkafka::client::ClientContext;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{Consumer, ConsumerContext, Rebalance, StreamConsumer};
+use rdkafka::topic_partition_list::TopicPartitionList;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::config::KafkaConfig;
 use crate::domain::{AccountUpdate, PubkeyFilter, bytes_to_base58};
@@ -34,8 +35,8 @@ impl ConsumerContext for ReadinessConsumerContext {
                 self.readiness.mark_kafka_ready();
                 info!(
                     group_id = self.group_id,
-                    partition_count = assignment.count(),
-                    "Kafka consumer received partition assignment"
+                    partitions = ?topic_partition_list(assignment),
+                    "Kafka partitions assigned"
                 );
             }
             Rebalance::Assign(_) => {}
@@ -43,8 +44,8 @@ impl ConsumerContext for ReadinessConsumerContext {
                 self.readiness.mark_kafka_not_ready();
                 info!(
                     group_id = self.group_id,
-                    partition_count = partitions.count(),
-                    "Kafka consumer partitions revoked"
+                    partitions = ?topic_partition_list(partitions),
+                    "Kafka partitions revoked"
                 );
             }
             Rebalance::Error(err) => {
@@ -57,6 +58,16 @@ impl ConsumerContext for ReadinessConsumerContext {
             }
         }
     }
+}
+
+fn topic_partition_list(partitions: &TopicPartitionList) -> Vec<String> {
+    partitions
+        .elements()
+        .iter()
+        .map(|partition| {
+            format!("{}:{}", partition.topic(), partition.partition())
+        })
+        .collect()
 }
 
 pub struct KafkaAccountUpdateStream {
@@ -142,6 +153,14 @@ impl KafkaAccountUpdateStream {
                 source,
             })?;
 
+        info!(
+            broker = self.config.bootstrap_servers,
+            topic = self.config.topic,
+            group_id = self.config.group_id,
+            auto_offset_reset = self.config.auto_offset_reset,
+            "Kafka consumer created"
+        );
+
         consumer
             .subscribe(&[&self.config.topic])
             .map_err(|source| GeykagError::KafkaSubscribe {
@@ -150,13 +169,9 @@ impl KafkaAccountUpdateStream {
             })?;
 
         info!(
-            broker = self.config.bootstrap_servers,
             topic = self.config.topic,
             group_id = self.config.group_id,
-            auto_offset_reset = self.config.auto_offset_reset,
-            pubkey_filter =
-                filter.map(PubkeyFilter::as_str).unwrap_or("(none)"),
-            "listening for Kafka messages"
+            "Kafka subscribe issued"
         );
 
         let mut stream = consumer.stream();
@@ -191,6 +206,15 @@ impl KafkaAccountUpdateStream {
                                     if !account.matches_filter(filter) {
                                         continue;
                                     }
+
+                                    debug!(
+                                        group_id = self.config.group_id,
+                                        partition = msg.partition(),
+                                        offset = msg.offset(),
+                                        pubkey = %account.pubkey_b58,
+                                        write_version = account.write_version,
+                                        "Kafka message consumed"
+                                    );
 
                                     handler(StreamMessage {
                                         account,
