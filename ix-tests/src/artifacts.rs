@@ -29,15 +29,15 @@ impl RunArtifacts {
         scenario: ScenarioName,
     ) -> anyhow::Result<Self> {
         let pid = std::process::id();
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
         let run_dir = PathBuf::from(format!(
             "target/ix-tests/tmp/{}-{}",
             scenario.as_str(),
             pid
         ));
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
         let run_id = format!("{}-{}", pid, timestamp);
         std::fs::create_dir_all(&run_dir).with_context(|| {
             format!("failed to create run dir: {}", run_dir.display())
@@ -59,22 +59,22 @@ impl RunArtifacts {
         &self,
         instance: ServiceInstance,
     ) -> PathBuf {
-        let label = match instance {
-            ServiceInstance::One => "service-1",
-            ServiceInstance::Two => "service-2",
-        };
-
-        self.run_dir.join(format!("{label}.generated.toml"))
+        self.run_dir
+            .join(format!("{}.generated.toml", Self::service_label(instance)))
     }
 
     pub fn service_logs(&self, instance: ServiceInstance) -> ServiceLogPaths {
-        let label = match instance {
-            ServiceInstance::One => "service-1",
-            ServiceInstance::Two => "service-2",
-        };
+        let label = Self::service_label(instance);
         ServiceLogPaths {
             stdout: self.run_dir.join(format!("{label}.stdout.log")),
             stderr: self.run_dir.join(format!("{label}.stderr.log")),
+        }
+    }
+
+    fn service_label(instance: ServiceInstance) -> &'static str {
+        match instance {
+            ServiceInstance::One => "service-1",
+            ServiceInstance::Two => "service-2",
         }
     }
 

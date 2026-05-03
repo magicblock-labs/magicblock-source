@@ -82,12 +82,9 @@ impl ServiceController {
         spec: &ServiceSpec,
         artifacts: &RunArtifacts,
     ) -> anyhow::Result<PathBuf> {
-        let base_group_id = match spec.instance {
-            ServiceInstance::One => "ix-tests-service-1",
-            ServiceInstance::Two => "ix-tests-service-2",
-        };
+        let base_group_id = Self::base_group_id(spec.instance);
         let run_scoped_group_id =
-            format!("{base_group_id}-{}", artifacts.run_id());
+            Self::run_scoped_group_id(spec.instance, artifacts);
         let base_group_id_line = format!("group_id = \"{base_group_id}\"");
         let generated_group_id_line =
             format!("group_id = \"{run_scoped_group_id}\"");
@@ -118,6 +115,20 @@ impl ServiceController {
             })?;
 
         Ok(generated_config_path)
+    }
+
+    fn base_group_id(instance: ServiceInstance) -> &'static str {
+        match instance {
+            ServiceInstance::One => "ix-tests-service-1",
+            ServiceInstance::Two => "ix-tests-service-2",
+        }
+    }
+
+    fn run_scoped_group_id(
+        instance: ServiceInstance,
+        artifacts: &RunArtifacts,
+    ) -> String {
+        format!("{}-{}", Self::base_group_id(instance), artifacts.run_id())
     }
 
     pub async fn start(
@@ -156,12 +167,8 @@ impl ServiceController {
                 )
             })?;
 
-        let base_group_id = match spec.instance {
-            ServiceInstance::One => "ix-tests-service-1",
-            ServiceInstance::Two => "ix-tests-service-2",
-        };
         let run_scoped_group_id =
-            format!("{base_group_id}-{}", artifacts.run_id());
+            Self::run_scoped_group_id(spec.instance, artifacts);
 
         info!(
             binary = %self.service_binary.display(),
