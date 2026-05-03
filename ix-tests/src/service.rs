@@ -4,12 +4,16 @@ use std::time::Duration;
 use anyhow::{Context, bail};
 use helius_laserstream::grpc::PingRequest;
 use helius_laserstream::grpc::geyser_client::GeyserClient;
+use nix::sys::signal::{self, Signal};
+use nix::unistd::Pid;
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
 use crate::artifacts::RunArtifacts;
 use crate::config::SuiteConfig;
 use crate::layout::ServiceInstance;
+
+const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[allow(dead_code)]
 pub enum ServiceOwnership {
@@ -206,17 +210,71 @@ impl ServiceController {
     pub async fn shutdown(&self, service: ServiceHandle) -> anyhow::Result<()> {
         match service.ownership {
             ServiceOwnership::Owned(mut child) => {
-                info!(
+                let pid = child.id();
+
+                if let Some(pid) = pid {
+                    match signal::kill(
+                        Pid::from_raw(pid as i32),
+                        Signal::SIGTERM,
+                    ) {
+                        Ok(()) => {
+                            info!(
+                                endpoint = %service.endpoint,
+                                pid,
+                                "graceful shutdown requested for grpc-service"
+                            );
+
+                            match tokio::time::timeout(
+                                GRACEFUL_SHUTDOWN_TIMEOUT,
+                                child.wait(),
+                            )
+                            .await
+                            {
+                                Ok(wait_result) => {
+                                    let status = wait_result.context(
+                                        "failed to wait for child after SIGTERM",
+                                    )?;
+                                    info!(
+                                        endpoint = %service.endpoint,
+                                        pid,
+                                        status = %status,
+                                        "grpc-service shut down gracefully"
+                                    );
+                                    return Ok(());
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        endpoint = %service.endpoint,
+                                        pid,
+                                        timeout = ?GRACEFUL_SHUTDOWN_TIMEOUT,
+                                        "graceful shutdown timed out; forcing grpc-service kill"
+                                    );
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                endpoint = %service.endpoint,
+                                pid,
+                                error = %err,
+                                "failed to request graceful shutdown; forcing grpc-service kill"
+                            );
+                        }
+                    }
+                }
+
+                child
+                    .start_kill()
+                    .context("failed to send forced kill to grpc-service")?;
+                let status = child
+                    .wait()
+                    .await
+                    .context("failed to wait for child after forced kill")?;
+                warn!(
                     endpoint = %service.endpoint,
-                    "shutting down grpc-service"
-                );
-                child.start_kill().context("failed to send kill")?;
-                let status =
-                    child.wait().await.context("failed to wait for child")?;
-                debug!(
-                    endpoint = %service.endpoint,
+                    pid = pid.unwrap_or_default(),
                     status = %status,
-                    "grpc-service exited"
+                    "grpc-service shutdown was forced"
                 );
             }
             ServiceOwnership::External => {
