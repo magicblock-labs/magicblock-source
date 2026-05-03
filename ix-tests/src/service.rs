@@ -77,6 +77,49 @@ impl ServiceController {
         }
     }
 
+    fn write_generated_config(
+        &self,
+        spec: &ServiceSpec,
+        artifacts: &RunArtifacts,
+    ) -> anyhow::Result<PathBuf> {
+        let base_group_id = match spec.instance {
+            ServiceInstance::One => "ix-tests-service-1",
+            ServiceInstance::Two => "ix-tests-service-2",
+        };
+        let run_scoped_group_id =
+            format!("{base_group_id}-{}", artifacts.run_id());
+        let base_group_id_line = format!("group_id = \"{base_group_id}\"");
+        let generated_group_id_line =
+            format!("group_id = \"{run_scoped_group_id}\"");
+        let config_text = std::fs::read_to_string(&spec.config_path)
+            .with_context(|| {
+                format!(
+                    "failed to read service config template: {}",
+                    spec.config_path.display()
+                )
+            })?;
+        if config_text.matches(&base_group_id_line).count() != 1 {
+            bail!(
+                "expected exactly one `{}` entry in {}",
+                base_group_id_line,
+                spec.config_path.display()
+            );
+        }
+        let generated_config_text =
+            config_text.replace(&base_group_id_line, &generated_group_id_line);
+        let generated_config_path =
+            artifacts.generated_service_config_path(spec.instance);
+        std::fs::write(&generated_config_path, generated_config_text)
+            .with_context(|| {
+                format!(
+                    "failed to write generated service config: {}",
+                    generated_config_path.display()
+                )
+            })?;
+
+        Ok(generated_config_path)
+    }
+
     pub async fn start(
         &self,
         spec: &ServiceSpec,
@@ -94,6 +137,8 @@ impl ServiceController {
             });
         }
 
+        let generated_config_path =
+            self.write_generated_config(spec, artifacts)?;
         let log_paths = artifacts.service_logs(spec.instance);
 
         let stdout_file = std::fs::File::create(&log_paths.stdout)
@@ -111,16 +156,24 @@ impl ServiceController {
                 )
             })?;
 
+        let base_group_id = match spec.instance {
+            ServiceInstance::One => "ix-tests-service-1",
+            ServiceInstance::Two => "ix-tests-service-2",
+        };
+        let run_scoped_group_id =
+            format!("{base_group_id}-{}", artifacts.run_id());
+
         info!(
             binary = %self.service_binary.display(),
-            config = %spec.config_path.display(),
+            config = %generated_config_path.display(),
             endpoint = %spec.endpoint,
+            group_id = %run_scoped_group_id,
             "starting grpc-service"
         );
 
         let child = Command::new(&self.service_binary)
             .arg("--config")
-            .arg(&spec.config_path)
+            .arg(&generated_config_path)
             .stdout(stdout_file)
             .stderr(stderr_file)
             .kill_on_drop(true)

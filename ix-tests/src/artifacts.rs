@@ -18,6 +18,7 @@ pub struct ServiceLogPaths {
 #[allow(dead_code)]
 pub struct RunArtifacts {
     run_dir: PathBuf,
+    run_id: String,
     failure_root: PathBuf,
     persist_on_failure: bool,
 }
@@ -33,15 +34,37 @@ impl RunArtifacts {
             scenario.as_str(),
             pid
         ));
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let run_id = format!("{}-{}", pid, timestamp);
         std::fs::create_dir_all(&run_dir).with_context(|| {
             format!("failed to create run dir: {}", run_dir.display())
         })?;
 
         Ok(Self {
             run_dir,
+            run_id,
             failure_root: config.failure_artifact_root.clone(),
             persist_on_failure: true,
         })
+    }
+
+    pub fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
+    pub fn generated_service_config_path(
+        &self,
+        instance: ServiceInstance,
+    ) -> PathBuf {
+        let label = match instance {
+            ServiceInstance::One => "service-1",
+            ServiceInstance::Two => "service-2",
+        };
+
+        self.run_dir.join(format!("{label}.generated.toml"))
     }
 
     pub fn service_logs(&self, instance: ServiceInstance) -> ServiceLogPaths {
