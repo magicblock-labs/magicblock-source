@@ -6,19 +6,31 @@ use prost::Message;
 use rdkafka::Message as KafkaMessage;
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::config::KafkaConfig;
 use crate::domain::{AccountUpdate, PubkeyFilter, bytes_to_base58};
 use crate::errors::{GeykagError, GeykagResult};
+use crate::grpc_service::ServiceReadiness;
 use crate::traits::AccountUpdateSource;
 pub struct KafkaAccountUpdateStream {
     config: KafkaConfig,
+    readiness: ServiceReadiness,
+    shutdown: CancellationToken,
 }
 
 impl KafkaAccountUpdateStream {
-    pub fn new(config: KafkaConfig) -> Self {
-        Self { config }
+    pub fn new(
+        config: KafkaConfig,
+        readiness: ServiceReadiness,
+        shutdown: CancellationToken,
+    ) -> Self {
+        Self {
+            config,
+            readiness,
+            shutdown,
+        }
     }
 
     /// Verify that the configured Kafka broker is reachable by
@@ -100,43 +112,60 @@ impl KafkaAccountUpdateStream {
             "listening for Kafka messages"
         );
 
+        let _ = &self.readiness;
         let mut stream = consumer.stream();
-        while let Some(message) = stream.next().await {
-            match message {
-                Ok(msg) => {
-                    let Some(payload) = msg.payload() else {
-                        warn!(
-                            partition = msg.partition(),
-                            offset = msg.offset(),
-                            "skipping empty payload"
-                        );
-                        continue;
+        loop {
+            tokio::select! {
+                _ = self.shutdown.cancelled() => {
+                    info!(
+                        group_id = self.config.group_id,
+                        topic = self.config.topic,
+                        "Kafka consumer shutdown requested"
+                    );
+                    break;
+                }
+                message = stream.next() => {
+                    let Some(message) = message else {
+                        break;
                     };
 
-                    match decode_account_update(payload) {
-                        Ok(account) => {
-                            if !account.matches_filter(filter) {
+                    match message {
+                        Ok(msg) => {
+                            let Some(payload) = msg.payload() else {
+                                warn!(
+                                    partition = msg.partition(),
+                                    offset = msg.offset(),
+                                    "skipping empty payload"
+                                );
                                 continue;
-                            }
+                            };
 
-                            handler(StreamMessage {
-                                account,
-                                partition: msg.partition(),
-                                offset: msg.offset(),
-                                timestamp: format!("{:?}", msg.timestamp()),
-                            })?;
+                            match decode_account_update(payload) {
+                                Ok(account) => {
+                                    if !account.matches_filter(filter) {
+                                        continue;
+                                    }
+
+                                    handler(StreamMessage {
+                                        account,
+                                        partition: msg.partition(),
+                                        offset: msg.offset(),
+                                        timestamp: format!("{:?}", msg.timestamp()),
+                                    })?;
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        partition = msg.partition(),
+                                        offset = msg.offset(),
+                                        error = %err,
+                                        "failed to decode message payload"
+                                    );
+                                }
+                            }
                         }
-                        Err(err) => {
-                            warn!(
-                                partition = msg.partition(),
-                                offset = msg.offset(),
-                                error = %err,
-                                "failed to decode message payload"
-                            );
-                        }
+                        Err(err) => error!(error = %err, "Kafka consumer error"),
                     }
                 }
-                Err(err) => error!(error = %err, "Kafka consumer error"),
             }
         }
 

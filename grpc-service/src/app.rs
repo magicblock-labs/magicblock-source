@@ -12,6 +12,7 @@ use crate::traits::{
     AccountSink, AccountUpdateSource, SnapshotStore, StatusSink,
 };
 use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 pub struct App<
     P: SnapshotStore,
@@ -25,6 +26,7 @@ pub struct App<
     sink: A,
     status_sink: S,
     readiness: ServiceReadiness,
+    shutdown: CancellationToken,
 }
 
 impl
@@ -39,15 +41,21 @@ impl
     pub fn new(config: Config) -> GeykagResult<Self> {
         let snapshot_store =
             KsqlAccountSnapshotClient::new(config.ksql.clone())?;
-        let account_update_source =
-            KafkaAccountUpdateStream::new(config.kafka.clone());
+        let readiness = ServiceReadiness::new();
+        let shutdown = CancellationToken::new();
+        let account_update_source = KafkaAccountUpdateStream::new(
+            config.kafka.clone(),
+            readiness.clone(),
+            shutdown.clone(),
+        );
         Ok(Self::build(
             config,
             snapshot_store,
             account_update_source,
             ConsoleSink::new(),
             ConsoleSink::new(),
-            ServiceReadiness::new(),
+            readiness,
+            shutdown,
         ))
     }
 }
@@ -61,20 +69,28 @@ impl
     >
 {
     #[allow(dead_code)]
-    pub fn new_grpc(config: Config) -> GeykagResult<(Self, GrpcServiceHandle)> {
+    pub fn new_grpc(
+        config: Config,
+        shutdown: CancellationToken,
+    ) -> GeykagResult<(Self, GrpcServiceHandle)> {
         let grpc = GrpcService::start(&config)?;
         let sink = grpc.sink();
         let snapshot_store =
             KsqlAccountSnapshotClient::new(config.ksql.clone())?;
-        let account_update_source =
-            KafkaAccountUpdateStream::new(config.kafka.clone());
+        let readiness = grpc.readiness();
+        let account_update_source = KafkaAccountUpdateStream::new(
+            config.kafka.clone(),
+            readiness.clone(),
+            shutdown.clone(),
+        );
         let app = Self::build(
             config,
             snapshot_store,
             account_update_source,
             sink,
             ConsoleSink::new(),
-            grpc.readiness(),
+            readiness,
+            shutdown,
         );
 
         Ok((app, grpc))
@@ -91,20 +107,26 @@ impl
 {
     pub fn new_grpc_with_console(
         config: Config,
+        shutdown: CancellationToken,
     ) -> GeykagResult<(Self, GrpcServiceHandle)> {
         let grpc = GrpcService::start(&config)?;
         let sink = TeeSink::new(grpc.sink(), ConsoleSink::new());
         let snapshot_store =
             KsqlAccountSnapshotClient::new(config.ksql.clone())?;
-        let account_update_source =
-            KafkaAccountUpdateStream::new(config.kafka.clone());
+        let readiness = grpc.readiness();
+        let account_update_source = KafkaAccountUpdateStream::new(
+            config.kafka.clone(),
+            readiness.clone(),
+            shutdown.clone(),
+        );
         let app = Self::build(
             config,
             snapshot_store,
             account_update_source,
             sink,
             ConsoleSink::new(),
-            grpc.readiness(),
+            readiness,
+            shutdown,
         );
 
         Ok((app, grpc))
@@ -121,6 +143,7 @@ impl<P: SnapshotStore, K: AccountUpdateSource, A: AccountSink, S: StatusSink>
         sink: A,
         status_sink: S,
         readiness: ServiceReadiness,
+        shutdown: CancellationToken,
     ) -> Self {
         Self {
             config,
@@ -129,6 +152,7 @@ impl<P: SnapshotStore, K: AccountUpdateSource, A: AccountSink, S: StatusSink>
             sink,
             status_sink,
             readiness,
+            shutdown,
         }
     }
 
@@ -166,6 +190,7 @@ impl<P: SnapshotStore, K: AccountUpdateSource, A: AccountSink, S: StatusSink>
             tracing::info!("service marked as ready");
         }
 
+        let _ = &self.shutdown;
         self.account_update_source
             .run(self.config.pubkey_filter.as_ref(), |message| {
                 let event = AccountEvent::Live(message);
@@ -194,6 +219,7 @@ mod tests {
     use crate::traits::{
         AccountSink, AccountUpdateSource, SnapshotStore, StatusSink,
     };
+    use tokio_util::sync::CancellationToken;
 
     fn config(pubkey_filter: Option<PubkeyFilter>) -> Config {
         Config {
@@ -439,6 +465,7 @@ mod tests {
             sink.clone(),
             status_sink.clone(),
             ServiceReadiness::ready_for_test(),
+            CancellationToken::new(),
         );
 
         app.run().await.unwrap();
@@ -464,6 +491,7 @@ mod tests {
             RecordingSink::new(false, false),
             status_sink.clone(),
             ServiceReadiness::ready_for_test(),
+            CancellationToken::new(),
         );
 
         app.run().await.unwrap();
@@ -489,6 +517,7 @@ mod tests {
             RecordingSink::new(false, false),
             status_sink.clone(),
             ServiceReadiness::ready_for_test(),
+            CancellationToken::new(),
         );
 
         app.run().await.unwrap();
@@ -517,6 +546,7 @@ mod tests {
             RecordingSink::new(false, false),
             RecordingStatusSink::new(),
             ServiceReadiness::ready_for_test(),
+            CancellationToken::new(),
         );
 
         let error = app.run().await.unwrap_err();
@@ -538,6 +568,7 @@ mod tests {
             RecordingSink::new(true, false),
             RecordingStatusSink::new(),
             ServiceReadiness::ready_for_test(),
+            CancellationToken::new(),
         );
 
         let error = app.run().await.unwrap_err();
@@ -558,6 +589,7 @@ mod tests {
             RecordingSink::new(false, true),
             RecordingStatusSink::new(),
             ServiceReadiness::ready_for_test(),
+            CancellationToken::new(),
         );
 
         let error = app.run().await.unwrap_err();
@@ -578,6 +610,7 @@ mod tests {
             RecordingSink::new(false, false),
             RecordingStatusSink::new(),
             ServiceReadiness::ready_for_test(),
+            CancellationToken::new(),
         );
 
         let error = app.run().await.unwrap_err();
