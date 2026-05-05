@@ -56,10 +56,20 @@ pub struct ScenarioAccounts {
 #[allow(dead_code)]
 impl ScenarioAccounts {
     pub fn new() -> Self {
-        let keypairs = ALL_NAMED_ACCOUNTS
+        let keypairs: HashMap<NamedAccount, Keypair> = ALL_NAMED_ACCOUNTS
             .iter()
             .map(|account| (*account, Keypair::new()))
             .collect();
+
+        let mapping: Vec<String> = ALL_NAMED_ACCOUNTS
+            .iter()
+            .map(|account| {
+                format!("{:?} → {}", account, keypairs[account].pubkey())
+            })
+            .collect();
+
+        tracing::info!(accounts = ?mapping, "generated random ScenarioAccounts pubkeys");
+
         Self { keypairs }
     }
 
