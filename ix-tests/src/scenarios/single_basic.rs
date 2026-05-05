@@ -137,7 +137,24 @@ async fn run_inner(
 
     let rent_lamports =
         ctx.validator.rent_exempt_balance(OWNER_DATA_SPACE).await?;
-    ctx.validator.airdrop(&owner_data, rent_lamports).await?;
+    let owner_data_airdrop_sig =
+        ctx.validator.airdrop(&owner_data, rent_lamports).await?;
+
+    let owner_data_funding_checkpoint = CheckpointSpec {
+        name: "owner-data-funding",
+        checkpoints: vec![ClientCheckpoint {
+            client_id: 3,
+            required: vec![ExpectedUpdate {
+                pubkey_b58: Some(owner_data.to_string()),
+                lamports: Some(rent_lamports),
+                txn_signature_b58: Some(Some(owner_data_airdrop_sig)),
+                ..Default::default()
+            }],
+        }],
+    };
+    ctx.checkpoint_runner
+        .wait_until_satisfied(&owner_data_funding_checkpoint, clients)
+        .await?;
 
     let synthetic_owner = Pubkey::new_from_array(SYNTHETIC_OWNER_BYTES);
     let owner_data_sig = ctx
@@ -152,6 +169,7 @@ async fn run_inner(
     let owner_data_expected = ExpectedUpdate {
         pubkey_b58: Some(owner_data.to_string()),
         owner_b58: Some(synthetic_owner.to_string()),
+        lamports: Some(rent_lamports),
         txn_signature_b58: Some(Some(owner_data_sig)),
         data: None,
         ..Default::default()
