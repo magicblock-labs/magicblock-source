@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
             service_controller: ServiceController::new(&config),
             validator: ValidatorDriver::new(&config),
             checkpoint_runner: CheckpointRunner::new(&config),
-            accounts: ScenarioAccounts::for_scenario(*scenario),
+            accounts: ScenarioAccounts::new(),
         };
 
         match scenarios::run_scenario(*scenario, &ctx).await {
