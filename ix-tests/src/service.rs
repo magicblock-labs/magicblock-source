@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
 use std::time::Duration;
 
 use anyhow::{Context, bail};
@@ -14,6 +17,7 @@ use crate::config::SuiteConfig;
 use crate::layout::ServiceInstance;
 
 const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const DEFAULT_SERVICE_GRPC_PORT: u16 = 50051;
 
 #[allow(dead_code)]
 pub enum ServiceOwnership {
@@ -44,6 +48,18 @@ pub struct ServiceController {
     service_start_timeout: Duration,
 }
 
+#[derive(Debug, Deserialize)]
+struct FileServiceConfig {
+    #[serde(default)]
+    grpc: Option<FileServiceGrpcConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FileServiceGrpcConfig {
+    #[serde(default)]
+    port: Option<u16>,
+}
+
 pub struct ServiceSpec {
     pub instance: ServiceInstance,
     pub config_path: PathBuf,
@@ -58,20 +74,73 @@ impl ServiceSpec {
                 config_path: PathBuf::from(
                     "ix-tests/configs/grpc-service/service-1.toml",
                 ),
-                endpoint: "http://127.0.0.1:51051".to_owned(),
+                endpoint: "http://127.0.0.1:50051".to_owned(),
             },
             ServiceInstance::Two => Self {
                 instance,
                 config_path: PathBuf::from(
                     "ix-tests/configs/grpc-service/service-2.toml",
                 ),
-                endpoint: "http://127.0.0.1:51052".to_owned(),
+                endpoint: "http://127.0.0.1:50052".to_owned(),
             },
         }
     }
 }
 
 impl ServiceController {
+    fn endpoint_port(endpoint: &str) -> anyhow::Result<u16> {
+        let socket_addr = endpoint
+            .strip_prefix("http://")
+            .ok_or_else(|| {
+                anyhow::anyhow!("unsupported endpoint format: {endpoint}")
+            })?
+            .parse::<SocketAddr>()
+            .with_context(|| {
+                format!("failed to parse endpoint as host:port: {endpoint}")
+            })?;
+        Ok(socket_addr.port())
+    }
+
+    fn configured_grpc_port(config_path: &Path) -> anyhow::Result<u16> {
+        let config_text =
+            std::fs::read_to_string(config_path).with_context(|| {
+                format!(
+                    "failed to read service config: {}",
+                    config_path.display()
+                )
+            })?;
+        let file: FileServiceConfig = toml::from_str(&config_text)
+            .with_context(|| {
+                format!(
+                    "failed to parse service config: {}",
+                    config_path.display()
+                )
+            })?;
+        Ok(file
+            .grpc
+            .and_then(|grpc| grpc.port)
+            .unwrap_or(DEFAULT_SERVICE_GRPC_PORT))
+    }
+
+    fn validate_spec_matches_config(
+        &self,
+        spec: &ServiceSpec,
+    ) -> anyhow::Result<()> {
+        let endpoint_port = Self::endpoint_port(&spec.endpoint)?;
+        let config_port = Self::configured_grpc_port(&spec.config_path)?;
+        if endpoint_port != config_port {
+            bail!(
+                "refusing to continue for {:?}: probe endpoint {} uses port {}, but template {} binds port {}; probe/reuse and spawned-service bind port would diverge",
+                spec.instance,
+                spec.endpoint,
+                endpoint_port,
+                spec.config_path.display(),
+                config_port,
+            );
+        }
+        Ok(())
+    }
+
     pub fn new(config: &SuiteConfig) -> Self {
         Self {
             service_binary: config.service_binary.clone(),
@@ -140,6 +209,8 @@ impl ServiceController {
         spec: &ServiceSpec,
         artifacts: &RunArtifacts,
     ) -> anyhow::Result<ServiceHandle> {
+        self.validate_spec_matches_config(spec)?;
+
         if self.probe_ready(&spec.endpoint).await {
             info!(
                 endpoint = %spec.endpoint,
