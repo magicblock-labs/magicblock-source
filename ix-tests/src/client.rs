@@ -216,6 +216,7 @@ impl TestGrpcClient {
 
     pub async fn shutdown(self) -> anyhow::Result<()> {
         drop(self.request_tx);
+        self.receive_task.abort();
         match self.receive_task.await {
             Ok(result) => result,
             Err(e) if e.is_cancelled() => Ok(()),
