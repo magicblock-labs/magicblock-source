@@ -59,12 +59,14 @@ async fn run_inner(
 
     ctx.validator.fund_payer().await?;
 
+    let rent_exempt_lamports = ctx.validator.rent_exempt_balance(0).await?;
+
     let mut expected_updates = Vec::new();
     for index in 1..=25u64 {
         let (account, lamports) = if index % 2 == 1 {
-            (NamedAccount::SharedA, 10_000 + index)
+            (NamedAccount::SharedA, rent_exempt_lamports + 10_000 + index)
         } else {
-            (NamedAccount::SharedB, 20_000 + index)
+            (NamedAccount::SharedB, rent_exempt_lamports + 20_000 + index)
         };
         let pubkey_b58 = ctx.accounts.pubkey_b58(account);
         let sig = ctx
