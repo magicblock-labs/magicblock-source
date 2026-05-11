@@ -75,21 +75,34 @@ async fn run_inner(
         .iter()
         .map(|(_, pubkey, lamports)| (*pubkey, *lamports))
         .collect();
-    let sigs = ctx.validator.airdrops(airdrop_requests).await?;
+    ctx.validator.airdrops(airdrop_requests).await?;
 
-    let expected_updates = airdrop_specs
-        .into_iter()
-        .zip(sigs)
-        .map(|(spec, sig)| {
-            let (account, _pubkey, lamports) = spec;
-            ExpectedUpdate {
-                pubkey_b58: Some(ctx.accounts.pubkey_b58(account)),
-                lamports: Some(lamports),
-                txn_signature_b58: Some(Some(sig)),
-                ..Default::default()
+    let (shared_a_balance, shared_b_balance) = airdrop_specs.iter().fold(
+        (0, 0),
+        |(shared_a_balance, shared_b_balance), (account, _pubkey, lamports)| {
+            match account {
+                NamedAccount::SharedA => {
+                    (shared_a_balance + lamports, shared_b_balance)
+                }
+                NamedAccount::SharedB => {
+                    (shared_a_balance, shared_b_balance + lamports)
+                }
+                _ => unreachable!("single-load only airdrops shared accounts"),
             }
-        })
-        .collect::<Vec<_>>();
+        },
+    );
+    let expected_updates = vec![
+        ExpectedUpdate {
+            pubkey_b58: Some(ctx.accounts.pubkey_b58(NamedAccount::SharedA)),
+            lamports: Some(shared_a_balance),
+            ..Default::default()
+        },
+        ExpectedUpdate {
+            pubkey_b58: Some(ctx.accounts.pubkey_b58(NamedAccount::SharedB)),
+            lamports: Some(shared_b_balance),
+            ..Default::default()
+        },
+    ];
 
     let client_specs = (0..100)
         .map(|client_id| ClientCheckpoint {

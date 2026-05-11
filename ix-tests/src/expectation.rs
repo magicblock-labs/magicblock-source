@@ -172,14 +172,11 @@ impl CheckpointRunner {
             while matched.iter().any(|is_matched| !*is_matched) {
                 let client_state = client.log().consume_next_update();
                 if let Some(observed) = client_state {
-                    let matched_idx =
-                        check_point.required.iter().enumerate().find_map(
-                            |(idx, expected)| {
-                                (!matched[idx]
-                                    && expected.matches_quietly(&observed))
-                                .then_some(idx)
-                            },
-                        );
+                    let matched_idx = next_required_match(
+                        &check_point.required,
+                        &matched,
+                        &observed,
+                    );
 
                     if let Some(idx) = matched_idx {
                         matched[idx] = true;
@@ -219,6 +216,30 @@ impl CheckpointRunner {
         }
         Ok(())
     }
+}
+
+fn next_required_match(
+    required: &[ExpectedUpdate],
+    matched: &[bool],
+    observed: &ObservedUpdate,
+) -> Option<usize> {
+    let next_for_observed_pubkey =
+        required.iter().enumerate().find(|(idx, expected)| {
+            !matched[*idx]
+                && expected.pubkey_b58.as_deref()
+                    == Some(observed.pubkey_b58.as_str())
+        });
+
+    if let Some((idx, expected)) = next_for_observed_pubkey {
+        return expected.matches_quietly(observed).then_some(idx);
+    }
+
+    required.iter().enumerate().find_map(|(idx, expected)| {
+        (!matched[idx]
+            && expected.pubkey_b58.is_none()
+            && expected.matches_quietly(observed))
+        .then_some(idx)
+    })
 }
 
 #[cfg(test)]
