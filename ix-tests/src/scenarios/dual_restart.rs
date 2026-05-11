@@ -9,6 +9,38 @@ use crate::observation::ClientLog;
 use crate::scenarios::ScenarioFailure;
 use crate::service::{ServiceHandle, ServiceSpec};
 
+const PRE_RESTART_A_AIRDROP_LAMPORTS: u64 = 4_444_444;
+const PRE_RESTART_B_AIRDROP_LAMPORTS: u64 = 5_555_555;
+const PRE_SHARED_B_AIRDROP_LAMPORTS: u64 = 6_666_666;
+
+const DURING_RESTART_A_AIRDROP_LAMPORTS: u64 = 7_777_777;
+const DURING_SHARED_B_AIRDROP_LAMPORTS: u64 = 8_888_888;
+
+const POST_RESTART_A_AIRDROP_LAMPORTS: u64 = 9_999_999;
+const POST_SHARED_B_AIRDROP_LAMPORTS: u64 = 10_101_010;
+
+// Account updates report the account's resulting balance, not the
+// individual airdrop delta. The first airdrops below target fresh random
+// accounts, so their resulting balances are equal to their airdrop amounts.
+const PRE_RESTART_A_EXPECTED_BALANCE: u64 = PRE_RESTART_A_AIRDROP_LAMPORTS;
+const PRE_RESTART_B_EXPECTED_BALANCE: u64 = PRE_RESTART_B_AIRDROP_LAMPORTS;
+const PRE_SHARED_B_EXPECTED_BALANCE: u64 = PRE_SHARED_B_AIRDROP_LAMPORTS;
+
+// During restart, service one is offline but the validator still applies both
+// airdrops. SharedB already has the pre-restart balance when this update is
+// emitted, so the expected lamports are cumulative.
+const DURING_RESTART_A_EXPECTED_BALANCE: u64 =
+    PRE_RESTART_A_EXPECTED_BALANCE + DURING_RESTART_A_AIRDROP_LAMPORTS;
+const DURING_SHARED_B_EXPECTED_BALANCE: u64 =
+    PRE_SHARED_B_EXPECTED_BALANCE + DURING_SHARED_B_AIRDROP_LAMPORTS;
+
+// After service one restarts, live updates again carry full account balances.
+// These expectations include all earlier airdrops to the same account.
+const POST_RESTART_A_EXPECTED_BALANCE: u64 =
+    DURING_RESTART_A_EXPECTED_BALANCE + POST_RESTART_A_AIRDROP_LAMPORTS;
+const POST_SHARED_B_EXPECTED_BALANCE: u64 =
+    DURING_SHARED_B_EXPECTED_BALANCE + POST_SHARED_B_AIRDROP_LAMPORTS;
+
 pub async fn run(ctx: &ScenarioContext) -> Result<(), ScenarioFailure> {
     let spec_one = ServiceSpec::for_instance(ServiceInstance::One);
     let spec_two = ServiceSpec::for_instance(ServiceInstance::Two);
@@ -78,9 +110,18 @@ async fn run_inner(
     let sigs = ctx
         .validator
         .airdrops(vec![
-            (ctx.accounts.pubkey(NamedAccount::RestartA), 4_444_444),
-            (ctx.accounts.pubkey(NamedAccount::RestartB), 5_555_555),
-            (ctx.accounts.pubkey(NamedAccount::SharedB), 6_666_666),
+            (
+                ctx.accounts.pubkey(NamedAccount::RestartA),
+                PRE_RESTART_A_AIRDROP_LAMPORTS,
+            ),
+            (
+                ctx.accounts.pubkey(NamedAccount::RestartB),
+                PRE_RESTART_B_AIRDROP_LAMPORTS,
+            ),
+            (
+                ctx.accounts.pubkey(NamedAccount::SharedB),
+                PRE_SHARED_B_AIRDROP_LAMPORTS,
+            ),
         ])
         .await?;
     let [restart_a_sig, restart_b_sig, shared_b_sig]: [String; 3] =
@@ -93,7 +134,7 @@ async fn run_inner(
                 0..5,
                 expected_update(
                     ctx.accounts.pubkey_b58(NamedAccount::RestartA),
-                    4_444_444,
+                    PRE_RESTART_A_EXPECTED_BALANCE,
                     restart_a_sig,
                 ),
             ),
@@ -101,7 +142,7 @@ async fn run_inner(
                 5..10,
                 expected_update(
                     ctx.accounts.pubkey_b58(NamedAccount::SharedB),
-                    6_666_666,
+                    PRE_SHARED_B_EXPECTED_BALANCE,
                     shared_b_sig.clone(),
                 ),
             ),
@@ -109,7 +150,7 @@ async fn run_inner(
                 10..15,
                 expected_update(
                     ctx.accounts.pubkey_b58(NamedAccount::RestartB),
-                    5_555_555,
+                    PRE_RESTART_B_EXPECTED_BALANCE,
                     restart_b_sig,
                 ),
             ),
@@ -117,7 +158,7 @@ async fn run_inner(
                 15..20,
                 expected_update(
                     ctx.accounts.pubkey_b58(NamedAccount::SharedB),
-                    6_666_666,
+                    PRE_SHARED_B_EXPECTED_BALANCE,
                     shared_b_sig,
                 ),
             ),
@@ -136,8 +177,14 @@ async fn run_inner(
     let sigs = ctx
         .validator
         .airdrops(vec![
-            (ctx.accounts.pubkey(NamedAccount::RestartA), 7_777_777),
-            (ctx.accounts.pubkey(NamedAccount::SharedB), 8_888_888),
+            (
+                ctx.accounts.pubkey(NamedAccount::RestartA),
+                DURING_RESTART_A_AIRDROP_LAMPORTS,
+            ),
+            (
+                ctx.accounts.pubkey(NamedAccount::SharedB),
+                DURING_SHARED_B_AIRDROP_LAMPORTS,
+            ),
         ])
         .await?;
     let [_during_restart_a_sig, during_shared_b_sig]: [String; 2] =
@@ -145,6 +192,8 @@ async fn run_inner(
 
     assert_logs_unchanged(&parked_logs)?;
 
+    // SharedB remains subscribed on service two while service one is down;
+    // lamports are the cumulative balance (6_666_666 + 8_888_888), not just the second airdrop.
     let during_restart = CheckpointSpec {
         name: "during-restart",
         checkpoints: vec![
@@ -153,7 +202,7 @@ async fn run_inner(
                 15..20,
                 expected_update(
                     ctx.accounts.pubkey_b58(NamedAccount::SharedB),
-                    8_888_888,
+                    DURING_SHARED_B_EXPECTED_BALANCE,
                     during_shared_b_sig,
                 ),
             ),
@@ -181,13 +230,21 @@ async fn run_inner(
     let sigs = ctx
         .validator
         .airdrops(vec![
-            (ctx.accounts.pubkey(NamedAccount::RestartA), 9_999_999),
-            (ctx.accounts.pubkey(NamedAccount::SharedB), 10_101_010),
+            (
+                ctx.accounts.pubkey(NamedAccount::RestartA),
+                POST_RESTART_A_AIRDROP_LAMPORTS,
+            ),
+            (
+                ctx.accounts.pubkey(NamedAccount::SharedB),
+                POST_SHARED_B_AIRDROP_LAMPORTS,
+            ),
         ])
         .await?;
     let [post_restart_a_sig, post_shared_b_sig]: [String; 2] =
         sigs.try_into().expect("expected two airdrop signatures");
 
+    // Reconnected live updates still report full balances: RestartA includes all
+    // three RestartA airdrops and SharedB includes all three SharedB airdrops.
     let post_restart = CheckpointSpec {
         name: "post-restart",
         checkpoints: vec![
@@ -195,7 +252,7 @@ async fn run_inner(
                 0..5,
                 expected_update(
                     ctx.accounts.pubkey_b58(NamedAccount::RestartA),
-                    9_999_999,
+                    POST_RESTART_A_EXPECTED_BALANCE,
                     post_restart_a_sig,
                 ),
             ),
@@ -203,7 +260,7 @@ async fn run_inner(
                 5..10,
                 expected_update(
                     ctx.accounts.pubkey_b58(NamedAccount::SharedB),
-                    10_101_010,
+                    POST_SHARED_B_EXPECTED_BALANCE,
                     post_shared_b_sig.clone(),
                 ),
             ),
@@ -212,7 +269,7 @@ async fn run_inner(
                 15..20,
                 expected_update(
                     ctx.accounts.pubkey_b58(NamedAccount::SharedB),
-                    10_101_010,
+                    POST_SHARED_B_EXPECTED_BALANCE,
                     post_shared_b_sig,
                 ),
             ),
