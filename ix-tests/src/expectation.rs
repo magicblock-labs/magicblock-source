@@ -45,6 +45,18 @@ pub struct CheckpointRunner {
 #[allow(dead_code)]
 impl ExpectedUpdate {
     pub fn matches(&self, observed: &ObservedUpdate) -> bool {
+        let mismatches = self.mismatches(observed);
+        if !mismatches.is_empty() {
+            warn!("Mismatches:\n {}", mismatches.join("\n  "));
+        }
+        mismatches.is_empty()
+    }
+
+    fn matches_quietly(&self, observed: &ObservedUpdate) -> bool {
+        self.mismatches(observed).is_empty()
+    }
+
+    fn mismatches(&self, observed: &ObservedUpdate) -> Vec<String> {
         let mut mismatches = Vec::new();
         if let Some(expected) = &self.pubkey_b58
             && observed.pubkey_b58 != *expected
@@ -124,10 +136,7 @@ impl ExpectedUpdate {
             ));
         }
 
-        if !mismatches.is_empty() {
-            warn!("Mismatches:\n {}", mismatches.join("\n  "));
-        }
-        mismatches.is_empty()
+        mismatches
     }
 }
 
@@ -159,43 +168,51 @@ impl CheckpointRunner {
                     )
                 })?;
 
-            for (idx, expected) in check_point.required.iter().enumerate() {
-                'retry: loop {
-                    let client_state = client.log().consume_next_update();
-                    if let Some(observed) = client_state {
-                        if expected.matches(&observed) {
-                            trace!(
-                                checkpoint = spec.name,
-                                idx,
-                                client_id = check_point.client_id,
-                                "matched expected update: {:#?}",
-                                expected
-                            );
-                            break 'retry;
-                        } else {
-                            error!(
-                                checkpoint = spec.name,
-                                idx,
-                                client_id = check_point.client_id,
-                                "expected update did not match observed update.\nExpected: {:#?}\nObserved: {:#?}",
-                                expected,
-                                observed
-                            );
-                            bail!(
-                                "checkpoint '{}' idx: {} failed for client {}",
-                                spec.name,
-                                idx,
-                                check_point.client_id
-                            );
-                        }
-                    } else if Instant::now() > deadline {
-                        bail!(
-                            "checkpoint '{}' idx: {} timed out waiting for client {}",
-                            spec.name,
+            let mut matched = vec![false; check_point.required.len()];
+            while matched.iter().any(|is_matched| !*is_matched) {
+                let client_state = client.log().consume_next_update();
+                if let Some(observed) = client_state {
+                    let matched_idx =
+                        check_point.required.iter().enumerate().find_map(
+                            |(idx, expected)| {
+                                (!matched[idx]
+                                    && expected.matches_quietly(&observed))
+                                .then_some(idx)
+                            },
+                        );
+
+                    if let Some(idx) = matched_idx {
+                        matched[idx] = true;
+                        trace!(
+                            checkpoint = spec.name,
                             idx,
-                            check_point.client_id
+                            client_id = check_point.client_id,
+                            "matched expected update: {:#?}",
+                            check_point.required[idx]
+                        );
+                    } else {
+                        debug!(
+                            checkpoint = spec.name,
+                            client_id = check_point.client_id,
+                            observed = ?observed,
+                            "skipping non-required update while waiting for checkpoint"
                         );
                     }
+                } else if Instant::now() > deadline {
+                    let missing = matched
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(idx, is_matched)| {
+                            (!*is_matched).then_some(idx)
+                        })
+                        .collect::<Vec<_>>();
+                    bail!(
+                        "checkpoint '{}' timed out waiting for client {}; missing required update indexes {:?}",
+                        spec.name,
+                        check_point.client_id,
+                        missing
+                    );
+                } else {
                     sleep(Duration::from_millis(50)).await;
                 }
             }
