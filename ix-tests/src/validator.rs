@@ -164,11 +164,33 @@ impl ValidatorDriver {
         sig: &solana_signature::Signature,
     ) -> anyhow::Result<()> {
         let deadline = tokio::time::Instant::now() + self.transaction_timeout;
+        let mut last_status_error = None;
         loop {
-            if self.rpc.confirm_transaction(sig).await.unwrap_or(false) {
-                return Ok(());
+            match self
+                .rpc
+                .get_signature_status_with_commitment(
+                    sig,
+                    CommitmentConfig::confirmed(),
+                )
+                .await
+            {
+                Ok(Some(Ok(()))) => return Ok(()),
+                Ok(Some(Err(err))) => {
+                    anyhow::bail!("transaction {sig} failed: {err:?}");
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    last_status_error = Some(err.to_string());
+                }
             }
+
             if tokio::time::Instant::now() >= deadline {
+                if let Some(error) = last_status_error {
+                    anyhow::bail!(
+                        "transaction {sig} not confirmed within {:?}; last status check error: {error}",
+                        self.transaction_timeout
+                    );
+                }
                 anyhow::bail!(
                     "transaction {sig} not confirmed within {:?}",
                     self.transaction_timeout
