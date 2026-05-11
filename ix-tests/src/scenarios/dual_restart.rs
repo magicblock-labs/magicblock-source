@@ -75,18 +75,16 @@ async fn run_inner(
 
     ctx.validator.fund_payer().await?;
 
-    let restart_a_sig = ctx
+    let sigs = ctx
         .validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::RestartA), 4_444_444)
+        .airdrops(vec![
+            (ctx.accounts.pubkey(NamedAccount::RestartA), 4_444_444),
+            (ctx.accounts.pubkey(NamedAccount::RestartB), 5_555_555),
+            (ctx.accounts.pubkey(NamedAccount::SharedB), 6_666_666),
+        ])
         .await?;
-    let restart_b_sig = ctx
-        .validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::RestartB), 5_555_555)
-        .await?;
-    let shared_b_sig = ctx
-        .validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::SharedB), 6_666_666)
-        .await?;
+    let [restart_a_sig, restart_b_sig, shared_b_sig]: [String; 3] =
+        sigs.try_into().expect("expected three airdrop signatures");
 
     let pre_restart = CheckpointSpec {
         name: "pre-restart",
@@ -135,13 +133,15 @@ async fn run_inner(
     let parked_logs = shutdown_service_one_clients(active_clients).await?;
     shutdown_service(&ctx.service_controller, service_one).await?;
 
-    ctx.validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::RestartA), 7_777_777)
-        .await?;
-    let during_shared_b_sig = ctx
+    let sigs = ctx
         .validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::SharedB), 8_888_888)
+        .airdrops(vec![
+            (ctx.accounts.pubkey(NamedAccount::RestartA), 7_777_777),
+            (ctx.accounts.pubkey(NamedAccount::SharedB), 8_888_888),
+        ])
         .await?;
+    let [_during_restart_a_sig, during_shared_b_sig]: [String; 2] =
+        sigs.try_into().expect("expected two airdrop signatures");
 
     assert_logs_unchanged(&parked_logs)?;
 
@@ -178,14 +178,15 @@ async fn run_inner(
     )
     .await?;
 
-    let post_restart_a_sig = ctx
+    let sigs = ctx
         .validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::RestartA), 9_999_999)
+        .airdrops(vec![
+            (ctx.accounts.pubkey(NamedAccount::RestartA), 9_999_999),
+            (ctx.accounts.pubkey(NamedAccount::SharedB), 10_101_010),
+        ])
         .await?;
-    let post_shared_b_sig = ctx
-        .validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::SharedB), 10_101_010)
-        .await?;
+    let [post_restart_a_sig, post_shared_b_sig]: [String; 2] =
+        sigs.try_into().expect("expected two airdrop signatures");
 
     let post_restart = CheckpointSpec {
         name: "post-restart",

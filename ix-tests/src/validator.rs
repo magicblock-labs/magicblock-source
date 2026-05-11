@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Context;
+use futures::future::try_join_all;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::{
@@ -64,6 +65,18 @@ impl ValidatorDriver {
         self.confirm_signature(&sig).await?;
         info!(%pubkey, lamports, %sig, "airdrop confirmed");
         Ok(sig.to_string())
+    }
+
+    pub async fn airdrops(
+        &self,
+        requests: Vec<(Pubkey, u64)>,
+    ) -> anyhow::Result<Vec<String>> {
+        try_join_all(
+            requests
+                .iter()
+                .map(|(pubkey, lamports)| self.airdrop(pubkey, *lamports)),
+        )
+        .await
     }
 
     pub async fn transfer(

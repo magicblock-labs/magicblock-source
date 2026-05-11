@@ -102,9 +102,16 @@ async fn run_inner(
     // correct lamports and signatures
     ctx.validator.fund_payer().await?;
 
-    let simple_a_sig = ctx.validator.airdrop(&simple_a, 1_000_000).await?;
-    let simple_b_sig = ctx.validator.airdrop(&simple_b, 2_000_000).await?;
-    let simple_c_sig = ctx.validator.airdrop(&simple_c, 3_000_000).await?;
+    let sigs = ctx
+        .validator
+        .airdrops(vec![
+            (simple_a, 1_000_000),
+            (simple_b, 2_000_000),
+            (simple_c, 3_000_000),
+        ])
+        .await?;
+    let [simple_a_sig, simple_b_sig, simple_c_sig]: [String; 3] =
+        sigs.try_into().expect("expected three airdrop signatures");
 
     let basic_checkpoint = CheckpointSpec {
         name: "basic-lamports",

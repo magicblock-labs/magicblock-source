@@ -91,18 +91,16 @@ async fn run_inner(
 
     ctx.validator.fund_payer().await?;
 
-    let simple_a_sig = ctx
+    let sigs = ctx
         .validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::SimpleA), 1_111_111)
+        .airdrops(vec![
+            (ctx.accounts.pubkey(NamedAccount::SimpleA), 1_111_111),
+            (ctx.accounts.pubkey(NamedAccount::SimpleB), 2_222_222),
+            (ctx.accounts.pubkey(NamedAccount::SharedA), 3_333_333),
+        ])
         .await?;
-    let simple_b_sig = ctx
-        .validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::SimpleB), 2_222_222)
-        .await?;
-    let shared_a_sig = ctx
-        .validator
-        .airdrop(&ctx.accounts.pubkey(NamedAccount::SharedA), 3_333_333)
-        .await?;
+    let [simple_a_sig, simple_b_sig, shared_a_sig]: [String; 3] =
+        sigs.try_into().expect("expected three airdrop signatures");
 
     let simple_a_expected = ExpectedUpdate {
         pubkey_b58: Some(simple_a),

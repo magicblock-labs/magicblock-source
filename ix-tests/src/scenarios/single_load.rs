@@ -61,25 +61,35 @@ async fn run_inner(
 
     let rent_exempt_lamports = ctx.validator.rent_exempt_balance(0).await?;
 
-    let mut expected_updates = Vec::new();
-    for index in 1..=25u64 {
-        let (account, lamports) = if index % 2 == 1 {
-            (NamedAccount::SharedA, rent_exempt_lamports + 10_000 + index)
-        } else {
-            (NamedAccount::SharedB, rent_exempt_lamports + 20_000 + index)
-        };
-        let pubkey_b58 = ctx.accounts.pubkey_b58(account);
-        let sig = ctx
-            .validator
-            .airdrop(&ctx.accounts.pubkey(account), lamports)
-            .await?;
-        expected_updates.push(ExpectedUpdate {
-            pubkey_b58: Some(pubkey_b58),
-            lamports: Some(lamports),
-            txn_signature_b58: Some(Some(sig)),
-            ..Default::default()
-        });
-    }
+    let airdrop_specs = (1..=25u64)
+        .map(|index| {
+            let (account, lamports) = if index % 2 == 1 {
+                (NamedAccount::SharedA, rent_exempt_lamports + 10_000 + index)
+            } else {
+                (NamedAccount::SharedB, rent_exempt_lamports + 20_000 + index)
+            };
+            (account, ctx.accounts.pubkey(account), lamports)
+        })
+        .collect::<Vec<_>>();
+    let airdrop_requests = airdrop_specs
+        .iter()
+        .map(|(_, pubkey, lamports)| (*pubkey, *lamports))
+        .collect();
+    let sigs = ctx.validator.airdrops(airdrop_requests).await?;
+
+    let expected_updates = airdrop_specs
+        .into_iter()
+        .zip(sigs)
+        .map(|(spec, sig)| {
+            let (account, _pubkey, lamports) = spec;
+            ExpectedUpdate {
+                pubkey_b58: Some(ctx.accounts.pubkey_b58(account)),
+                lamports: Some(lamports),
+                txn_signature_b58: Some(Some(sig)),
+                ..Default::default()
+            }
+        })
+        .collect::<Vec<_>>();
 
     let client_specs = (0..100)
         .map(|client_id| ClientCheckpoint {
