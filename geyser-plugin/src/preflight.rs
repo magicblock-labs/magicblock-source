@@ -14,8 +14,15 @@
 
 use {
     agave_geyser_plugin_interface::geyser_plugin_interface::GeyserPluginError,
+    rdkafka::{
+        ClientConfig,
+        producer::{BaseProducer, Producer},
+    },
     std::{error::Error, fmt, fs, path::PathBuf},
 };
+
+pub(crate) const STARTUP_CHECK_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(3);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartupError {
@@ -89,6 +96,96 @@ pub(crate) fn run_static_startup_checks(
         ));
     }
     Ok(loaded)
+}
+
+pub fn check_kafka_readiness(
+    config: &crate::config::Config,
+) -> Result<(), StartupError> {
+    let mut producer_config = ClientConfig::new();
+    for (key, value) in &config.kafka.client {
+        producer_config.set(key, value);
+    }
+    producer_config.set("bootstrap.servers", &config.kafka.bootstrap_servers);
+
+    let producer: BaseProducer = producer_config.create().map_err(|error| {
+        StartupError::new(
+            "kafka",
+            Some("kafka.client"),
+            Some(config.kafka.bootstrap_servers.clone()),
+            format!(
+                "failed to create kafka producer for readiness check: {error}"
+            ),
+            "fix kafka.bootstrap_servers or kafka.client settings in geyser-plugin/plugin-config.toml",
+        )
+    })?;
+
+    let metadata = match producer
+        .client()
+        .fetch_metadata(Some(&config.kafka.topic), STARTUP_CHECK_TIMEOUT)
+    {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            drop_readiness_producer(producer);
+            return Err(StartupError::new(
+                "kafka",
+                Some("kafka.bootstrap_servers"),
+                Some(config.kafka.bootstrap_servers.clone()),
+                format!("failed to fetch kafka metadata: {error}"),
+                "start Kafka with make kafka-ready or update kafka.bootstrap_servers in geyser-plugin/plugin-config.toml",
+            ));
+        }
+    };
+
+    drop_readiness_producer(producer);
+
+    validate_topic_metadata(&metadata, &config.kafka.topic).map_err(|cause| {
+        StartupError::new(
+            "kafka",
+            Some("kafka.topic"),
+            Some(config.kafka.topic.clone()),
+            cause,
+            "create the topic or enable broker topic auto-creation before launching the validator",
+        )
+    })
+}
+
+fn drop_readiness_producer(producer: BaseProducer) {
+    let _ = producer.flush(STARTUP_CHECK_TIMEOUT);
+    drop(producer);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+}
+
+fn validate_topic_metadata(
+    metadata: &rdkafka::metadata::Metadata,
+    topic: &str,
+) -> Result<(), String> {
+    validate_topic_entries(
+        metadata.topics().iter().map(|topic_metadata| {
+            (
+                topic_metadata.name(),
+                topic_metadata.error().map(|error| format!("{error:?}")),
+            )
+        }),
+        topic,
+    )
+}
+
+fn validate_topic_entries<'a>(
+    topic_entries: impl IntoIterator<Item = (&'a str, Option<String>)>,
+    topic: &str,
+) -> Result<(), String> {
+    let Some((_, error)) = topic_entries
+        .into_iter()
+        .find(|(topic_name, _)| *topic_name == topic)
+    else {
+        return Err("topic is not present in broker metadata".to_string());
+    };
+
+    if let Some(error) = error {
+        return Err(format!("topic metadata error: {error}"));
+    }
+
+    Ok(())
 }
 
 pub fn load_config_with_paths(
@@ -236,7 +333,10 @@ fn config_error_to_startup_error(
 
 #[cfg(test)]
 mod tests {
-    use super::{load_config_with_paths, run_static_startup_checks};
+    use super::{
+        load_config_with_paths, run_static_startup_checks,
+        validate_topic_entries,
+    };
     use std::{
         fs,
         path::PathBuf,
@@ -395,5 +495,37 @@ admin = "127.0.0.1:8080"
         assert_eq!(paths.libpath, libpath);
 
         fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn topic_metadata_validation_accepts_present_topic_without_error() {
+        let result = validate_topic_entries(
+            [("other", None), ("solana.testnet.account_updates", None)],
+            "solana.testnet.account_updates",
+        );
+
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn topic_metadata_validation_reports_missing_topic() {
+        let error =
+            validate_topic_entries([("other", None)], "missing").unwrap_err();
+
+        assert_eq!(error, "topic is not present in broker metadata");
+    }
+
+    #[test]
+    fn topic_metadata_validation_reports_topic_error() {
+        let error = validate_topic_entries(
+            [(
+                "solana.testnet.account_updates",
+                Some("unknown topic".into()),
+            )],
+            "solana.testnet.account_updates",
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "topic metadata error: unknown topic");
     }
 }
