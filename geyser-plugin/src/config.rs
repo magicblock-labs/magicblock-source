@@ -239,16 +239,42 @@ impl Config {
                         .to_owned(),
                 });
             }
-
-            if self.ksql.table.trim().is_empty() {
-                return Err(GeyserPluginError::ConfigFileReadError {
-                    msg: "invalid config field `ksql.table`: table must not be empty".to_owned(),
-                });
-            }
         }
+
+        validate_ksql_identifier(&self.ksql.table).map_err(|error| {
+            GeyserPluginError::ConfigFileReadError {
+                msg: format!("invalid config field `ksql.table`: {error}"),
+            }
+        })?;
 
         Ok(())
     }
+}
+
+/// Validates that `identifier` is a safe ksqlDB identifier suitable for
+/// direct interpolation into a SQL statement. The identifier must start with
+/// an ASCII letter or `_` and may otherwise contain only ASCII alphanumeric
+/// characters or `_`.
+pub(crate) fn validate_ksql_identifier(
+    identifier: &str,
+) -> std::io::Result<&str> {
+    let mut chars = identifier.chars();
+    let first = chars.next().ok_or_else(|| {
+        std::io::Error::other("ksql identifier must not be empty")
+    })?;
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return Err(std::io::Error::other(format!(
+            "invalid ksql identifier `{identifier}`: must start with an ASCII letter or `_`"
+        )));
+    }
+    for c in chars {
+        if !(c.is_ascii_alphanumeric() || c == '_') {
+            return Err(std::io::Error::other(format!(
+                "invalid ksql identifier `{identifier}`: only ASCII alphanumeric characters and `_` are allowed"
+            )));
+        }
+    }
+    Ok(identifier)
 }
 
 #[allow(dead_code)]
@@ -275,11 +301,44 @@ pub(crate) fn resolve_runtime_config_path(
 
 #[cfg(test)]
 mod tests {
-    use super::Config;
+    use super::{Config, validate_ksql_identifier};
     use std::{
         fs,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn test_validates_simple_identifier() {
+        assert_eq!(validate_ksql_identifier("accounts").unwrap(), "accounts");
+        assert_eq!(validate_ksql_identifier("_x").unwrap(), "_x");
+        assert_eq!(validate_ksql_identifier("A1_b2").unwrap(), "A1_b2");
+    }
+
+    #[test]
+    fn test_rejects_empty_identifier() {
+        let error = validate_ksql_identifier("").unwrap_err().to_string();
+        assert!(error.contains("must not be empty"));
+    }
+
+    #[test]
+    fn test_rejects_identifier_starting_with_digit() {
+        let error = validate_ksql_identifier("1bad").unwrap_err().to_string();
+        assert!(error.contains("must start with an ASCII letter"));
+    }
+
+    #[test]
+    fn test_rejects_identifier_with_invalid_characters() {
+        let error = validate_ksql_identifier("accounts; DROP TABLE x")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("only ASCII alphanumeric"));
+    }
+
+    #[test]
+    fn test_rejects_identifier_with_quote() {
+        let error = validate_ksql_identifier("a\"b").unwrap_err().to_string();
+        assert!(error.contains("only ASCII alphanumeric"));
+    }
 
     fn parse_config(toml: &str) -> Result<Config, String> {
         let mut config: Config =
@@ -606,6 +665,55 @@ admin = "127.0.0.1:8080"
         assert!(
             error.contains("empty host") || error.contains("host is required")
         );
+    }
+
+    #[test]
+    fn test_rejects_invalid_ksql_table_identifier() {
+        let error = parse_config(
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[ksql]
+url = "http://127.0.0.1:8088"
+table = "bad-name"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("invalid config field `ksql.table`"));
+        assert!(error.contains("only ASCII alphanumeric"));
+    }
+
+    #[test]
+    fn test_rejects_ksql_table_starting_with_digit() {
+        let error = parse_config(
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[ksql]
+table = "1bad"
+
+[plugin]
+local_rpc_url = "http://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("invalid config field `ksql.table`"));
+        assert!(error.contains("must start with an ASCII letter"));
     }
 
     #[test]

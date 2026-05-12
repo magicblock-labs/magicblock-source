@@ -98,6 +98,53 @@ pub(crate) fn run_static_startup_checks(
     Ok(loaded)
 }
 
+pub fn check_ksql_readiness(
+    config: &crate::config::Config,
+) -> Result<(), StartupError> {
+    let Some(raw_url) = config.ksql.url.as_deref() else {
+        return Ok(());
+    };
+    let url = raw_url.trim();
+
+    crate::config::validate_ksql_identifier(&config.ksql.table).map_err(
+        |error| {
+            StartupError::new(
+                "ksql",
+                Some("ksql.table"),
+                Some(config.ksql.table.clone()),
+                format!("invalid ksql.table identifier: {error}"),
+                "fix ksql.table to be a valid SQL identifier",
+            )
+        },
+    )?;
+
+    let client = crate::ksql::KsqlPubkeyRestoreClient::new(
+        url,
+        &config.ksql.table,
+    )
+    .map_err(|error| {
+        StartupError::new(
+            "ksql",
+            Some("ksql.url"),
+            Some(url.to_owned()),
+            format!("failed to run startup restore query: {error}"),
+            "start ksqlDB with make kafka-ready, fix ksql.url/ksql.table, or remove ksql.url to disable startup restore",
+        )
+    })?;
+
+    client.fetch_pubkeys().map_err(|error| {
+        StartupError::new(
+            "ksql",
+            Some("ksql.url"),
+            Some(url.to_owned()),
+            format!("failed to run startup restore query: {error}"),
+            "start ksqlDB with make kafka-ready, fix ksql.url/ksql.table, or remove ksql.url to disable startup restore",
+        )
+    })?;
+
+    Ok(())
+}
+
 pub fn check_kafka_readiness(
     config: &crate::config::Config,
 ) -> Result<(), StartupError> {
