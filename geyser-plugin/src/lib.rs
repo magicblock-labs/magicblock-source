@@ -21,6 +21,8 @@ mod initial_account_backfill;
 mod ksql;
 mod metrics;
 mod plugin;
+#[allow(dead_code)]
+mod preflight;
 mod publisher;
 mod server;
 mod version;

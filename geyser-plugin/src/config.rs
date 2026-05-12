@@ -77,10 +77,10 @@ pub struct PluginConfig {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ValidatorConfig {
+pub(crate) struct ValidatorConfig {
     #[allow(dead_code)]
-    libpath: String,
-    config_file: PathBuf,
+    pub(crate) libpath: PathBuf,
+    pub(crate) config_file: PathBuf,
 }
 
 fn default_shutdown_timeout_ms() -> u64 {
@@ -171,14 +171,14 @@ impl Config {
         }
     }
 
-    fn fill_defaults(&mut self) {
+    pub(crate) fn fill_defaults(&mut self) {
         self.set_default("request.required.acks", "1");
         self.set_default("message.timeout.ms", "30000");
         self.set_default("compression.type", "lz4");
         self.set_default("partitioner", "murmur2_random");
     }
 
-    fn validate(&self) -> PluginResult<()> {
+    pub(crate) fn validate(&self) -> PluginResult<()> {
         if self.kafka.bootstrap_servers.trim().is_empty() {
             return Err(GeyserPluginError::ConfigFileReadError {
                 msg: "missing required config field `kafka.bootstrap_servers`"
@@ -257,7 +257,7 @@ fn read_to_string(path: &Path) -> PluginResult<String> {
     Ok(contents)
 }
 
-fn resolve_runtime_config_path(
+pub(crate) fn resolve_runtime_config_path(
     wrapper_path: &Path,
     runtime_path: &Path,
 ) -> PathBuf {
