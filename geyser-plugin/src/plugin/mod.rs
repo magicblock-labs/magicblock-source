@@ -88,17 +88,14 @@ impl GeyserPlugin for KafkaPlugin {
             self.name(),
             config_file
         );
-        let config = Config::read_from(config_file)?;
+        let loaded = crate::preflight::run_static_startup_checks(config_file)
+            .map_err(startup_error_to_plugin_error)?;
+        let config = loaded.config;
 
         let (version_n, version_s) = get_rdkafka_version();
         info!("rd_kafka_version: {:#08x}, {}", version_n, version_s);
 
-        let mut producer_config = ClientConfig::new();
-        for (key, value) in &config.kafka.client {
-            producer_config.set(key, value);
-        }
-        producer_config
-            .set("bootstrap.servers", &config.kafka.bootstrap_servers);
+        let producer_config = build_producer_config(&config);
         let producer =
             rdkafka::producer::ThreadedProducer::from_config_and_context(
                 &producer_config,
@@ -262,6 +259,22 @@ impl KafkaPlugin {
 
         Ok(())
     }
+}
+
+fn build_producer_config(config: &Config) -> ClientConfig {
+    let mut producer_config = ClientConfig::new();
+    for (key, value) in &config.kafka.client {
+        producer_config.set(key, value);
+    }
+    producer_config.set("bootstrap.servers", &config.kafka.bootstrap_servers);
+    producer_config
+}
+
+fn startup_error_to_plugin_error(
+    error: crate::preflight::StartupError,
+) -> PluginError {
+    error!("{error}");
+    PluginError::Custom(Box::new(std::io::Error::other(error.to_string())))
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

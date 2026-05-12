@@ -73,6 +73,24 @@ pub struct LoadedPluginConfig {
     pub config: crate::config::Config,
 }
 
+pub(crate) fn run_static_startup_checks(
+    config_path: impl AsRef<std::path::Path>,
+) -> Result<LoadedPluginConfig, StartupError> {
+    let loaded = load_config_with_paths(config_path)?;
+    if let Some(paths) = &loaded.paths
+        && !paths.libpath.exists()
+    {
+        return Err(StartupError::new(
+            "config",
+            Some("libpath"),
+            Some(paths.libpath.display().to_string()),
+            "plugin shared library does not exist",
+            "run make geyser-plugin-build or update libpath in the validator JSON wrapper",
+        ));
+    }
+    Ok(loaded)
+}
+
 pub fn load_config_with_paths(
     config_path: impl AsRef<std::path::Path>,
 ) -> Result<LoadedPluginConfig, StartupError> {
@@ -218,7 +236,7 @@ fn config_error_to_startup_error(
 
 #[cfg(test)]
 mod tests {
-    use super::load_config_with_paths;
+    use super::{load_config_with_paths, run_static_startup_checks};
     use std::{
         fs,
         path::PathBuf,
@@ -318,6 +336,63 @@ admin = "127.0.0.1:8080"
         let loaded = load_config_with_paths(&runtime_path).unwrap();
         assert!(loaded.paths.is_none());
         assert_eq!(loaded.config.kafka.topic, "solana.testnet.account_updates");
+
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn static_startup_checks_report_missing_libpath() {
+        let base = temp_dir("missing-libpath");
+        fs::create_dir_all(&base).unwrap();
+        let runtime_path = base.join("runtime.toml");
+        fs::write(&runtime_path, valid_runtime_config()).unwrap();
+        let wrapper_path = base.join("plugin-config.json");
+        fs::write(
+            &wrapper_path,
+            r#"{
+  "libpath": "missing-plugin.so",
+  "config_file": "runtime.toml"
+}"#,
+        )
+        .unwrap();
+
+        let error = run_static_startup_checks(&wrapper_path).unwrap_err();
+        assert_eq!(error.subsystem, "config");
+        assert_eq!(error.field, Some("libpath"));
+        assert!(
+            error
+                .target
+                .as_deref()
+                .unwrap()
+                .ends_with("missing-plugin.so")
+        );
+        assert_eq!(error.cause, "plugin shared library does not exist");
+        assert!(error.action.contains("make geyser-plugin-build"));
+
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn static_startup_checks_accept_existing_libpath() {
+        let base = temp_dir("existing-libpath");
+        fs::create_dir_all(&base).unwrap();
+        let runtime_path = base.join("runtime.toml");
+        fs::write(&runtime_path, valid_runtime_config()).unwrap();
+        let libpath = base.join("plugin.so");
+        fs::write(&libpath, "").unwrap();
+        let wrapper_path = base.join("plugin-config.json");
+        fs::write(
+            &wrapper_path,
+            r#"{
+  "libpath": "plugin.so",
+  "config_file": "runtime.toml"
+}"#,
+        )
+        .unwrap();
+
+        let loaded = run_static_startup_checks(&wrapper_path).unwrap();
+        let paths = loaded.paths.unwrap();
+        assert_eq!(paths.libpath, libpath);
 
         fs::remove_dir_all(&base).unwrap();
     }

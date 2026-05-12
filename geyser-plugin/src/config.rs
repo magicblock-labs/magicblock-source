@@ -125,6 +125,7 @@ impl Default for KsqlConfig {
 
 impl Config {
     /// Read plugin config from either a validator JSON wrapper or a TOML runtime config.
+    #[allow(dead_code)]
     pub fn read_from<P: AsRef<Path>>(config_path: P) -> PluginResult<Self> {
         let config_path = config_path.as_ref();
         let contents = read_to_string(config_path)?;
@@ -250,6 +251,7 @@ impl Config {
     }
 }
 
+#[allow(dead_code)]
 fn read_to_string(path: &Path) -> PluginResult<String> {
     let mut file = File::open(path)?;
     let mut contents = String::new();
