@@ -193,10 +193,40 @@ impl Config {
             });
         }
 
-        if self.plugin.local_rpc_url.trim().is_empty() {
+        let trimmed_local_rpc_url = self.plugin.local_rpc_url.trim();
+        if trimmed_local_rpc_url.is_empty() {
             return Err(GeyserPluginError::ConfigFileReadError {
-                msg: "missing required config field `plugin.local_rpc_url`"
-                    .to_owned(),
+                msg:
+                    "invalid config field `plugin.local_rpc_url`: URL must not be empty"
+                        .to_owned(),
+            });
+        }
+
+        let parsed_local_rpc_url =
+            Url::parse(trimmed_local_rpc_url).map_err(|error| {
+                GeyserPluginError::ConfigFileReadError {
+                    msg: format!(
+                        "invalid config field `plugin.local_rpc_url`: {error}"
+                    ),
+                }
+            })?;
+
+        match parsed_local_rpc_url.scheme() {
+            "http" | "https" => {}
+            scheme => {
+                return Err(GeyserPluginError::ConfigFileReadError {
+                    msg: format!(
+                        "invalid config field `plugin.local_rpc_url`: unsupported scheme `{scheme}`"
+                    ),
+                });
+            }
+        }
+
+        if !parsed_local_rpc_url.has_host() {
+            return Err(GeyserPluginError::ConfigFileReadError {
+                msg:
+                    "invalid config field `plugin.local_rpc_url`: host is required"
+                        .to_owned(),
             });
         }
 
@@ -714,6 +744,92 @@ admin = "127.0.0.1:8080"
 
         assert!(error.contains("invalid config field `ksql.table`"));
         assert!(error.contains("must start with an ASCII letter"));
+    }
+
+    #[test]
+    fn test_rejects_empty_local_rpc_url() {
+        let error = parse_config(
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "   "
+admin = "127.0.0.1:8080"
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("invalid config field `plugin.local_rpc_url`"));
+        assert!(error.contains("URL must not be empty"));
+    }
+
+    #[test]
+    fn test_rejects_local_rpc_url_without_scheme() {
+        let error = parse_config(
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("invalid config field `plugin.local_rpc_url`"));
+        assert!(error.contains("relative URL without a base"));
+    }
+
+    #[test]
+    fn test_rejects_local_rpc_url_with_unsupported_scheme() {
+        let error = parse_config(
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "ftp://127.0.0.1:8899"
+admin = "127.0.0.1:8080"
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("invalid config field `plugin.local_rpc_url`"));
+        assert!(error.contains("unsupported scheme `ftp`"));
+    }
+
+    #[test]
+    fn test_rejects_local_rpc_url_without_host() {
+        let error = parse_config(
+            r#"
+libpath = "target/release/libsolana_accountsdb_plugin_kafka.so"
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+topic = "solana.testnet.account_updates"
+
+[plugin]
+local_rpc_url = "http://:8899"
+admin = "127.0.0.1:8080"
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("invalid config field `plugin.local_rpc_url`"));
+        assert!(
+            error.contains("empty host") || error.contains("host is required")
+        );
     }
 
     #[test]

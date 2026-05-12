@@ -23,17 +23,22 @@ use {
 
 pub(crate) async fn fetch_account_events_for_request(
     client: &RpcClient,
+    local_rpc_url: &str,
     pubkeys: &[[u8; 32]],
 ) -> io::Result<Vec<UpdateAccountEvent>> {
     let mut events = Vec::with_capacity(pubkeys.len());
     for chunk in pubkeys.chunks(INITIAL_BACKFILL_MAX_RPC_KEYS_PER_REQUEST) {
-        events.extend(fetch_account_events_for_chunk(client, chunk).await?);
+        events.extend(
+            fetch_account_events_for_chunk(client, local_rpc_url, chunk)
+                .await?,
+        );
     }
     Ok(events)
 }
 
 async fn fetch_account_events_for_chunk(
     client: &RpcClient,
+    local_rpc_url: &str,
     pubkeys: &[[u8; 32]],
 ) -> io::Result<Vec<UpdateAccountEvent>> {
     let keys = pubkeys
@@ -106,9 +111,10 @@ async fn fetch_account_events_for_chunk(
                     .with_label_values(&["failed"])
                     .inc();
                 warn!(
-                    "Initial account backfill RPC request failed for {} pubkeys, \
+                    "Initial account backfill RPC request failed for {} pubkeys via {}, \
                      attempt={}/{}: {error}",
                     pubkeys.len(),
+                    local_rpc_url,
                     attempt,
                     INITIAL_BACKFILL_MAX_ATTEMPTS
                 );
@@ -123,7 +129,24 @@ async fn fetch_account_events_for_chunk(
         }
     }
 
-    Err(io::Error::other(last_error.unwrap()))
+    let last_error_message = last_error
+        .map(|error| error.to_string())
+        .unwrap_or_else(|| "unknown error".to_owned());
+    Err(io::Error::other(format_exhausted_error(
+        local_rpc_url,
+        INITIAL_BACKFILL_MAX_ATTEMPTS,
+        &last_error_message,
+    )))
+}
+
+pub(crate) fn format_exhausted_error(
+    local_rpc_url: &str,
+    max_attempts: usize,
+    last_error_message: &str,
+) -> String {
+    format!(
+        "initial account backfill RPC failed after {max_attempts} attempts via {local_rpc_url}: {last_error_message}"
+    )
 }
 
 pub(crate) const SYSTEM_PROGRAM_ID: Pubkey =
@@ -167,5 +190,24 @@ pub(crate) fn map_missing_account(
         data_version: 0,
         is_startup: false,
         account_age: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_exhausted_error_includes_url_and_attempts() {
+        let message = format_exhausted_error(
+            "http://127.0.0.1:8899",
+            INITIAL_BACKFILL_MAX_ATTEMPTS,
+            "connection refused",
+        );
+
+        assert!(message.starts_with(&format!(
+            "initial account backfill RPC failed after {INITIAL_BACKFILL_MAX_ATTEMPTS} attempts via http://127.0.0.1:8899: "
+        )));
+        assert!(message.contains("connection refused"));
     }
 }

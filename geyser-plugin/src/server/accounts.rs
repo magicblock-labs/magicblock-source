@@ -190,13 +190,27 @@ pub async fn handle_post_accounts(
         }
         Err(AddAccountsError::QueueFull(outcome)) => json_response(
             StatusCode::SERVICE_UNAVAILABLE,
-            &AccountsResponse::from(outcome),
+            &BackfillUnavailableResponse {
+                error: "initial account backfill queue is full; retry the request after the validator RPC is available"
+                    .to_owned(),
+                accounts: AccountsResponse::from(outcome),
+            },
         ),
         Err(AddAccountsError::BackfillUnavailable(outcome)) => json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            &AccountsResponse::from(outcome),
+            &BackfillUnavailableResponse {
+                error: "initial account backfill enqueue failed; retry the request after the validator RPC is available"
+                    .to_owned(),
+                accounts: AccountsResponse::from(outcome),
+            },
         ),
     }
+}
+
+#[derive(serde::Serialize)]
+struct BackfillUnavailableResponse {
+    error: String,
+    accounts: AccountsResponse,
 }
 
 impl From<AddAccountsOutcome> for AccountsResponse {
