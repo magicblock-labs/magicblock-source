@@ -93,6 +93,9 @@ impl GeyserPlugin for KafkaPlugin {
             .map_err(startup_error_to_plugin_error)?;
         let config = loaded.config;
 
+        crate::preflight::check_admin_bind(&config)
+            .map_err(startup_error_to_plugin_error)?;
+
         let (version_n, version_s) = get_rdkafka_version();
         info!("rd_kafka_version: {:#08x}, {}", version_n, version_s);
 

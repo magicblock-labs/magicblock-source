@@ -10,7 +10,11 @@ pub fn metrics_handler() -> Response<Full<Bytes>> {
             error!("could not encode custom metrics: {}", error);
             String::new()
         });
-    Response::builder()
-        .body(Full::new(Bytes::from(metrics)))
-        .unwrap()
+    match Response::builder().body(Full::new(Bytes::from(metrics))) {
+        Ok(response) => response,
+        Err(error) => {
+            error!("failed to build metrics response: {error}");
+            Response::new(Full::new(Bytes::new()))
+        }
+    }
 }

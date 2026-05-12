@@ -145,6 +145,24 @@ pub fn check_ksql_readiness(
     Ok(())
 }
 
+pub fn check_admin_bind(
+    config: &crate::config::Config,
+) -> Result<(), StartupError> {
+    match std::net::TcpListener::bind(config.plugin.admin) {
+        Ok(listener) => {
+            drop(listener);
+            Ok(())
+        }
+        Err(error) => Err(StartupError::new(
+            "admin",
+            Some("plugin.admin"),
+            Some(config.plugin.admin.to_string()),
+            format!("failed to bind admin HTTP address: {error}"),
+            "choose a free plugin.admin port or stop the process currently using it",
+        )),
+    }
+}
+
 pub fn check_kafka_readiness(
     config: &crate::config::Config,
 ) -> Result<(), StartupError> {
@@ -381,11 +399,12 @@ fn config_error_to_startup_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        load_config_with_paths, run_static_startup_checks,
+        check_admin_bind, load_config_with_paths, run_static_startup_checks,
         validate_topic_entries,
     };
     use std::{
         fs,
+        net::TcpListener,
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
@@ -574,5 +593,43 @@ admin = "127.0.0.1:8080"
         .unwrap_err();
 
         assert_eq!(error, "topic metadata error: unknown topic");
+    }
+
+    #[test]
+    fn check_admin_bind_reports_address_in_use() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let mut config = crate::config::Config::default();
+        config.plugin.admin = local_addr;
+
+        let error = check_admin_bind(&config).unwrap_err();
+        assert_eq!(error.subsystem, "admin");
+        assert_eq!(error.field, Some("plugin.admin"));
+        assert_eq!(
+            error.target.as_deref(),
+            Some(local_addr.to_string().as_str())
+        );
+        assert!(error.cause.contains("failed to bind admin HTTP address"));
+        assert!(error.action.contains("free plugin.admin port"));
+
+        drop(listener);
+    }
+
+    #[test]
+    fn check_admin_bind_succeeds_on_free_port() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let local_addr = listener.local_addr().unwrap();
+        drop(listener);
+
+        let mut config = crate::config::Config::default();
+        config.plugin.admin = local_addr;
+
+        // It is possible (though unlikely) for the OS to assign the port to a
+        // different process between the drop and the bind here. Treat both
+        // outcomes as acceptable for this test of the success path.
+        if let Err(error) = check_admin_bind(&config) {
+            panic!("expected admin bind to succeed, got: {error}");
+        }
     }
 }
