@@ -45,7 +45,7 @@ fi
 sleep 2
 
 TABLES_OUTPUT="$($DC run --rm ksqldb-cli ksql "${KSQL_SERVER_URL}" -e "SHOW TABLES;")"
-if printf '%s\n' "$TABLES_OUTPUT" | grep -q "${TABLE_UPPER}"; then
+if printf '%s\n' "$TABLES_OUTPUT" | awk -v NAME="$TABLE_UPPER" '$1 == NAME { found = 1 } END { exit !found }'; then
   echo "Dropping table '${TABLE_UPPER}'..."
   $DC run --rm ksqldb-cli ksql "${KSQL_SERVER_URL}" -e "DROP TABLE ${TABLE_UPPER} DELETE TOPIC;"
 else
@@ -53,7 +53,7 @@ else
 fi
 
 STREAMS_OUTPUT="$($DC run --rm ksqldb-cli ksql "${KSQL_SERVER_URL}" -e "SHOW STREAMS;")"
-if printf '%s\n' "$STREAMS_OUTPUT" | grep -q "${STREAM_UPPER}"; then
+if printf '%s\n' "$STREAMS_OUTPUT" | awk -v NAME="$STREAM_UPPER" '$1 == NAME { found = 1 } END { exit !found }'; then
   echo "Dropping stream '${STREAM}'..."
   $DC run --rm ksqldb-cli ksql "${KSQL_SERVER_URL}" -e "DROP STREAM ${STREAM};"
 else
