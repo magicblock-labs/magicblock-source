@@ -6,9 +6,7 @@ use tracing::{debug, info, warn};
 
 use crate::config::Config;
 use crate::errors::{GeykagError, GeykagResult};
-use crate::grpc_service::ServiceReadiness;
 use crate::kafka::KafkaAccountUpdateStream;
-use tokio_util::sync::CancellationToken;
 
 const PROBE_INITIAL_BACKOFF: Duration = Duration::from_millis(250);
 const PROBE_MAX_BACKOFF: Duration = Duration::from_secs(2);
@@ -48,13 +46,8 @@ pub async fn wait_for_dependencies(
     })
     .await?;
 
-    let kafka_stream = KafkaAccountUpdateStream::new(
-        config.kafka.clone(),
-        ServiceReadiness::new(),
-        CancellationToken::new(),
-    );
     run_probe_with_retry("kafka-metadata", deadline, || async {
-        kafka_stream.probe()
+        KafkaAccountUpdateStream::probe_config(&config.kafka).await
     })
     .await?;
 

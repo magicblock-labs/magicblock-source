@@ -44,16 +44,21 @@ impl ClientLog {
 
     pub fn snapshot_from(&self, start_index: usize) -> Vec<ObservedUpdate> {
         let guard = self.entries.lock().unwrap();
-        guard[start_index..].to_vec()
+        if start_index >= guard.len() {
+            Vec::new()
+        } else {
+            guard[start_index..].to_vec()
+        }
     }
 
     /// Takes the next update in the order it came in
     /// Removes and returns it from the log
     pub fn consume_next_update(&self) -> Option<ObservedUpdate> {
-        if self.entries.lock().unwrap().is_empty() {
+        let mut guard = self.entries.lock().unwrap();
+        if guard.is_empty() {
             None
         } else {
-            Some(self.entries.lock().unwrap().remove(0))
+            Some(guard.remove(0))
         }
     }
 

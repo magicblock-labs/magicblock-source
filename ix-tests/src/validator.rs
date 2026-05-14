@@ -38,13 +38,16 @@ impl ValidatorDriver {
 
     pub async fn fund_payer(&self) -> anyhow::Result<()> {
         let lamports = 10_000_000_000; // 10 SOL
-        self.rpc
+        let sig = self
+            .rpc
             .request_airdrop(&self.payer.pubkey(), lamports)
             .await
             .context("fund_payer: request_airdrop failed")?;
+        self.confirm_signature(&sig).await?;
         info!(
             payer = %self.payer.pubkey(),
             lamports,
+            %sig,
             "funded payer"
         );
         Ok(())

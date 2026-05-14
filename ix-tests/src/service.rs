@@ -19,12 +19,27 @@ use crate::layout::ServiceInstance;
 const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_SERVICE_GRPC_PORT: u16 = 50051;
 
+/// Describes whether a service was started by this harness or supplied externally.
 #[allow(dead_code)]
 pub enum ServiceOwnership {
+    /// Child process spawned by [`ServiceController::start`].
+    ///
+    /// The process is spawned with `.kill_on_drop(true)` and stored in
+    /// [`ServiceHandle`] as `ServiceOwnership::Owned(child)`. Dropping the
+    /// handle without passing it to [`ServiceController::shutdown`] therefore
+    /// kills the child immediately instead of performing the graceful SIGTERM
+    /// shutdown path.
     Owned(tokio::process::Child),
     External,
 }
 
+/// Handle that keeps a service process alive for the lifetime of a test.
+///
+/// Callers must retain this handle until they are ready to terminate the
+/// service. For owned services, call [`ServiceController::shutdown`] with the
+/// handle to request graceful termination; otherwise the contained child was
+/// created with `.kill_on_drop(true)` and will be killed when the handle (and
+/// its `ServiceOwnership::Owned(child)`) is dropped.
 #[allow(dead_code)]
 pub struct ServiceHandle {
     pub instance: ServiceInstance,
@@ -375,49 +390,86 @@ impl ServiceController {
         let deadline = tokio::time::Instant::now() + self.service_start_timeout;
         let mut announced_waiting = false;
 
+        enum ReadinessProbeResult {
+            Ready,
+            ConnectError(tonic::transport::Error),
+            PingError(tonic::Status),
+        }
+
         loop {
-            match GeyserClient::connect(endpoint.to_owned()).await {
-                Ok(mut client) => {
-                    match client.ping(PingRequest { count: 1 }).await {
-                        Ok(_) => {
-                            info!(endpoint, "grpc-service is ready");
-                            return Ok(());
-                        }
-                        Err(err) if err.code() == tonic::Code::Unavailable => {
-                            if !announced_waiting {
-                                info!(
-                                    endpoint,
-                                    message = %err.message(),
-                                    "grpc-service listening but not yet ready; waiting for startup preflight"
-                                );
-                                announced_waiting = true;
-                            } else {
-                                debug!(
-                                    endpoint,
-                                    message = %err.message(),
-                                    "grpc-service still preflight-pending"
-                                );
-                            }
-                        }
-                        Err(err) => {
-                            warn!(
-                                endpoint,
-                                "ping returned non-readiness error: {err}"
-                            );
+            let attempt_timeout =
+                deadline.saturating_duration_since(tokio::time::Instant::now());
+            let probe = async {
+                match GeyserClient::connect(endpoint.to_owned()).await {
+                    Ok(mut client) => {
+                        match client.ping(PingRequest { count: 1 }).await {
+                            Ok(_) => ReadinessProbeResult::Ready,
+                            Err(err) => ReadinessProbeResult::PingError(err),
                         }
                     }
+                    Err(err) => ReadinessProbeResult::ConnectError(err),
                 }
-                Err(err) => {
+            };
+
+            match tokio::time::timeout(attempt_timeout, probe).await {
+                Ok(ReadinessProbeResult::Ready) => {
+                    info!(endpoint, "grpc-service is ready");
+                    return Ok(());
+                }
+                Ok(ReadinessProbeResult::PingError(err))
+                    if err.code() == tonic::Code::Unavailable =>
+                {
+                    if !announced_waiting {
+                        info!(
+                            endpoint,
+                            message = %err.message(),
+                            "grpc-service listening but not yet ready; waiting for startup preflight"
+                        );
+                        announced_waiting = true;
+                    } else {
+                        debug!(
+                            endpoint,
+                            message = %err.message(),
+                            "grpc-service still preflight-pending"
+                        );
+                    }
+                }
+                Ok(ReadinessProbeResult::PingError(err)) => {
+                    warn!(endpoint, "ping returned non-readiness error: {err}");
+                }
+                Ok(ReadinessProbeResult::ConnectError(err)) => {
                     debug!(
                         endpoint,
                         "grpc-service not yet accepting connections: {err}"
                     );
                 }
+                Err(_) => {
+                    if !announced_waiting {
+                        info!(
+                            endpoint,
+                            timeout = ?attempt_timeout,
+                            "grpc-service readiness probe timed out; waiting for startup"
+                        );
+                        announced_waiting = true;
+                    } else {
+                        debug!(
+                            endpoint,
+                            timeout = ?attempt_timeout,
+                            "grpc-service readiness probe still timing out"
+                        );
+                    }
+                }
             }
 
             if tokio::time::Instant::now() >= deadline {
-                RunArtifacts::dump_service_logs_at(log_paths)
-                    .context("failed to dump service logs")?;
+                if let Err(err) = RunArtifacts::dump_service_logs_at(log_paths)
+                {
+                    warn!(
+                        endpoint,
+                        error = %err,
+                        "failed to dump service logs after grpc-service readiness timeout"
+                    );
+                }
                 bail!(
                     "grpc-service at {} did not become ready within {:?}\n\
                      stdout: {}\n\

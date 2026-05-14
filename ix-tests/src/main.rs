@@ -16,7 +16,7 @@ mod service;
 #[allow(dead_code)]
 mod validator;
 
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::accounts::ScenarioAccounts;
 use crate::context::ScenarioContext;
@@ -79,14 +79,29 @@ async fn main() -> anyhow::Result<()> {
                 info!(scenario = scenario.as_str(), "scenario passed");
             }
             Err(failure) => {
-                if !failure.clients.is_empty() {
-                    ctx.artifacts
-                        .write_client_updates(*scenario, &failure.clients)?;
+                let scenarios::ScenarioFailure {
+                    error: original_error,
+                    clients,
+                } = failure;
+
+                if !clients.is_empty()
+                    && let Err(error) =
+                        ctx.artifacts.write_client_updates(*scenario, &clients)
+                {
+                    warn!(?error, "failed to write client updates artifact");
                 }
-                ctx.artifacts
-                    .dump_service_logs(layout::ServiceInstance::One)?;
-                ctx.artifacts.persist_failure()?;
-                return Err(failure.error);
+                for service in
+                    [layout::ServiceInstance::One, layout::ServiceInstance::Two]
+                {
+                    if let Err(error) = ctx.artifacts.dump_service_logs(service)
+                    {
+                        warn!(?error, ?service, "failed to dump service logs");
+                    }
+                }
+                if let Err(error) = ctx.artifacts.persist_failure() {
+                    warn!(?error, "failed to persist failure artifacts");
+                }
+                return Err(original_error);
             }
         }
     }

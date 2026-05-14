@@ -54,35 +54,37 @@ impl TestGrpcClient {
         let log = ClientLog::new();
         let log_clone = log.clone();
 
-        fn pubkey_str(bytes: &[u8]) -> String {
+        fn pubkey_str(bytes: &[u8]) -> Option<String> {
             if bytes.is_empty() {
-                return String::new();
+                return Some(String::new());
             }
-            Pubkey::try_from(bytes.to_vec())
-                .inspect_err(|err| {
+            match Pubkey::try_from(bytes.to_vec()) {
+                Ok(pubkey) => Some(pubkey.to_string()),
+                Err(err) => {
                     error!(
                         bytes = ?bytes,
                         err = ?err,
                         "failed to parse pubkey"
-                    )
-                })
-                .unwrap()
-                .to_string()
-        }
-        fn txn_signature_str(bytes: &[u8]) -> String {
-            if bytes.is_empty() {
-                return String::new();
+                    );
+                    None
+                }
             }
-            Signature::try_from(bytes.to_vec())
-                .inspect_err(|err| {
+        }
+        fn txn_signature_str(bytes: &[u8]) -> Option<String> {
+            if bytes.is_empty() {
+                return Some(String::new());
+            }
+            match Signature::try_from(bytes.to_vec()) {
+                Ok(signature) => Some(signature.to_string()),
+                Err(err) => {
                     error!(
                         bytes = ?bytes,
                         err = ?err,
                         "failed to parse txn signature"
-                    )
-                })
-                .unwrap()
-                .to_string()
+                    );
+                    None
+                }
+            }
         }
 
         let receive_task = tokio::spawn(async move {
@@ -98,20 +100,38 @@ impl TestGrpcClient {
                                 .unwrap_or_default()
                                 .as_millis();
 
+                            let Some(pubkey_b58) = pubkey_str(&info.pubkey)
+                            else {
+                                continue;
+                            };
+                            let Some(owner_b58) = pubkey_str(&info.owner)
+                            else {
+                                continue;
+                            };
+                            let txn_signature_b58 =
+                                match info.txn_signature.as_ref() {
+                                    Some(signature) => {
+                                        let Some(signature_b58) =
+                                            txn_signature_str(signature)
+                                        else {
+                                            continue;
+                                        };
+                                        Some(signature_b58)
+                                    }
+                                    None => None,
+                                };
+
                             let observed = ObservedUpdate {
                                 client_id: id,
                                 service,
-                                pubkey_b58: pubkey_str(&info.pubkey),
+                                pubkey_b58,
                                 slot: account_update.slot,
                                 lamports: info.lamports,
-                                owner_b58: pubkey_str(&info.owner),
+                                owner_b58,
                                 executable: info.executable,
                                 rent_epoch: info.rent_epoch,
                                 write_version: info.write_version,
-                                txn_signature_b58: info
-                                    .txn_signature
-                                    .as_ref()
-                                    .map(|x| txn_signature_str(x)),
+                                txn_signature_b58,
                                 data: info.data,
                                 received_at_millis: now,
                             };
