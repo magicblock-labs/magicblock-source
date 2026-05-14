@@ -55,9 +55,10 @@ impl InitialAccountBackfill {
             update_account_topic,
             subscriptions,
             client: RpcClient::new_with_commitment(
-                local_rpc_url,
+                local_rpc_url.clone(),
                 CommitmentConfig::confirmed(),
             ),
+            local_rpc_url,
         });
         let handle = InitialAccountBackfillHandle {
             inner: inner.clone(),
@@ -96,6 +97,7 @@ impl InitialAccountBackfill {
                 String::new(),
                 CommitmentConfig::confirmed(),
             ),
+            local_rpc_url: String::new(),
         });
         Self {
             handle: InitialAccountBackfillHandle { inner },
@@ -254,11 +256,17 @@ struct InitialAccountBackfillInner {
     update_account_topic: Arc<String>,
     subscriptions: AccountSubscriptions,
     client: RpcClient,
+    local_rpc_url: String,
 }
 
 impl InitialAccountBackfillInner {
     async fn process_request(&self, pubkeys: &[[u8; 32]]) {
-        match rpc::fetch_account_events_for_request(&self.client, pubkeys).await
+        match rpc::fetch_account_events_for_request(
+            &self.client,
+            &self.local_rpc_url,
+            pubkeys,
+        )
+        .await
         {
             Ok(events) => {
                 info!(
@@ -399,6 +407,7 @@ mod tests {
                     String::new(),
                     CommitmentConfig::confirmed(),
                 ),
+                local_rpc_url: String::new(),
             }),
             rx,
         )

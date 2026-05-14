@@ -32,12 +32,26 @@ impl HttpService {
         initial_account_backfill: InitialAccountBackfillHandle,
         metrics_enabled: bool,
     ) -> IoResult<Self> {
-        if metrics_enabled {
-            register_metrics();
+        if metrics_enabled && let Err(error) = register_metrics() {
+            let message =
+                format!("failed to register Prometheus metrics: {error}");
+            error!("{message}");
+            return Err(std::io::Error::other(message));
         }
 
         let runtime = Runtime::new()?;
-        let listener = runtime.block_on(TcpListener::bind(address))?;
+        let listener =
+            runtime
+                .block_on(TcpListener::bind(address))
+                .map_err(|error| {
+                    let message = format!(
+                        "Failed to bind admin HTTP API to {address}: {error}. \
+                     Choose a free plugin.admin port or stop the process \
+                     currently using it."
+                    );
+                    error!("{message}");
+                    std::io::Error::new(error.kind(), message)
+                })?;
 
         runtime.spawn(async move {
             loop {

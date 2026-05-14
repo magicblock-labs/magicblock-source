@@ -39,6 +39,7 @@ use {
     rdkafka::{ClientConfig, config::FromClientConfigAndContext},
     std::{
         fmt::{Debug, Formatter},
+        io,
         sync::{Arc, Mutex, MutexGuard},
         time::Duration,
     },
@@ -88,17 +89,24 @@ impl GeyserPlugin for KafkaPlugin {
             self.name(),
             config_file
         );
-        let config = Config::read_from(config_file)?;
-
         let (version_n, version_s) = get_rdkafka_version();
         info!("rd_kafka_version: {:#08x}, {}", version_n, version_s);
 
-        let mut producer_config = ClientConfig::new();
-        for (key, value) in &config.kafka.client {
-            producer_config.set(key, value);
-        }
-        producer_config
-            .set("bootstrap.servers", &config.kafka.bootstrap_servers);
+        let loaded = crate::preflight::run_static_startup_checks(config_file)
+            .map_err(startup_error_to_plugin_error)?;
+        let config = loaded.config;
+
+        crate::preflight::check_admin_bind(&config)
+            .map_err(startup_error_to_plugin_error)?;
+
+        crate::preflight::check_kafka_readiness(&config)
+            .map_err(startup_error_to_plugin_error)?;
+        crate::preflight::check_ksql_readiness(&config)
+            .map_err(startup_error_to_plugin_error)?;
+
+        let prefetched_restore = Self::fetch_tracking_from_ksql(&config)?;
+
+        let producer_config = build_producer_config(&config);
         let producer =
             rdkafka::producer::ThreadedProducer::from_config_and_context(
                 &producer_config,
@@ -120,8 +128,8 @@ impl GeyserPlugin for KafkaPlugin {
             config.plugin.local_rpc_url.clone(),
         )
         .map_err(|error| PluginError::Custom(Box::new(error)))?;
-        Self::restore_tracking_from_ksql(
-            &config,
+        Self::restore_prefetched_tracking(
+            prefetched_restore,
             &self.account_subscriptions,
             &initial_account_backfill,
         )?;
@@ -218,39 +226,68 @@ impl KafkaPlugin {
             .expect("update_account_topic is unavailable")
     }
 
-    fn restore_tracking_from_ksql(
+    fn fetch_tracking_from_ksql(
         config: &Config,
-        account_subscriptions: &AccountSubscriptions,
-        initial_account_backfill: &InitialAccountBackfill,
-    ) -> PluginResult<()> {
+    ) -> PluginResult<Option<KsqlStartupRestore>> {
         let Some(raw_url) = config.ksql.url.as_deref() else {
-            return Ok(());
+            return Ok(None);
         };
         let url = raw_url.trim();
-
-        let table = &config.ksql.table;
+        let table = config.ksql.table.clone();
         info!("Startup ksql restore enabled, url={}, table={}", url, table);
 
-        let client = KsqlPubkeyRestoreClient::new(url, table)
-            .map_err(|error| PluginError::Custom(Box::new(error)))?;
-        let pubkeys = client
-            .fetch_pubkeys()
-            .map_err(|error| PluginError::Custom(Box::new(error)))?;
+        let client = KsqlPubkeyRestoreClient::new(url, &table).map_err(
+            |error| {
+                error!(
+                    "Startup ksql restore failed before plugin initialization completed: {error}"
+                );
+                PluginError::Custom(Box::new(io::Error::other(format!(
+                    "Startup ksql restore failed before plugin initialization completed: {error}"
+                ))))
+            },
+        )?;
+        let pubkeys = client.fetch_pubkeys().map_err(|error| {
+            error!(
+                "Startup ksql restore failed before plugin initialization completed: {error}"
+            );
+            PluginError::Custom(Box::new(io::Error::other(format!(
+                "Startup ksql restore failed before plugin initialization completed: {error}"
+            ))))
+        })?;
         let fetched_count = pubkeys.len();
         info!(
             "Fetched {} pubkeys from ksql startup restore",
             fetched_count
         );
 
+        Ok(Some(KsqlStartupRestore {
+            url: url.to_owned(),
+            table,
+            pubkeys,
+        }))
+    }
+
+    fn restore_prefetched_tracking(
+        restore: Option<KsqlStartupRestore>,
+        account_subscriptions: &AccountSubscriptions,
+        initial_account_backfill: &InitialAccountBackfill,
+    ) -> PluginResult<()> {
+        let Some(restore) = restore else {
+            return Ok(());
+        };
+
+        let fetched_count = restore.pubkeys.len();
         let summary = restore_pubkeys_in_chunks(
             account_subscriptions,
             initial_account_backfill.handle_ref(),
-            pubkeys,
+            restore.pubkeys,
         )
         .map_err(add_accounts_error_to_plugin_error)?;
 
         info!(
-            "Completed startup ksql restore, fetched_count={}, deduplicated_count={}, chunk_count={}, accepted_count={}, newly_added_count={}, retried_backfill_count={}, duplicate_count={}",
+            "Completed startup ksql restore, url={}, table={}, fetched_count={}, deduplicated_count={}, chunk_count={}, accepted_count={}, newly_added_count={}, retried_backfill_count={}, duplicate_count={}",
+            restore.url,
+            restore.table,
             fetched_count,
             summary.deduplicated_count,
             summary.chunk_count,
@@ -262,6 +299,29 @@ impl KafkaPlugin {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Default)]
+struct KsqlStartupRestore {
+    url: String,
+    table: String,
+    pubkeys: Vec<[u8; 32]>,
+}
+
+fn build_producer_config(config: &Config) -> ClientConfig {
+    let mut producer_config = ClientConfig::new();
+    for (key, value) in &config.kafka.client {
+        producer_config.set(key, value);
+    }
+    producer_config.set("bootstrap.servers", &config.kafka.bootstrap_servers);
+    producer_config
+}
+
+fn startup_error_to_plugin_error(
+    error: crate::preflight::StartupError,
+) -> PluginError {
+    error!("{error}");
+    std::process::exit(1);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -374,19 +434,13 @@ mod tests {
     }
 
     #[test]
-    fn test_restore_tracking_from_ksql_is_noop_when_disabled() {
+    fn test_fetch_tracking_from_ksql_is_noop_when_disabled() {
         let config = Config::default();
         let subs = AccountSubscriptions::new();
-        let initial_account_backfill =
-            crate::initial_account_backfill::InitialAccountBackfill::default();
 
-        let result = KafkaPlugin::restore_tracking_from_ksql(
-            &config,
-            &subs,
-            &initial_account_backfill,
-        );
+        let result = KafkaPlugin::fetch_tracking_from_ksql(&config);
 
-        assert!(result.is_ok());
+        assert!(matches!(result, Ok(None)));
         assert!(!subs.contains_sync(&pk(1)));
     }
 

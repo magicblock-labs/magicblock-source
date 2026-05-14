@@ -123,6 +123,65 @@ admin = "127.0.0.1:3000"
 
 `kafka.bootstrap_servers`, `kafka.topic`, `plugin.local_rpc_url`, and `plugin.admin` are required. The `admin` bind address serves `POST /filters/accounts` and, when `plugin.metrics` is `true`, also `GET /metrics`. If `ksql.url` is set, it must be a valid absolute `http` or `https` base URL and startup will fail if the restore query cannot complete. Legacy filter arrays and legacy transaction, slot-status, block, and wrapping options are rejected during config parsing.
 
+## Startup checks
+
+Startup checks run from `KafkaPlugin::on_load` during normal validator/plugin startup. They run whether the validator is launched through `make geyser-plugin-launch` or directly with `solana-test-validator --geyser-plugin-config ...`; no separate preflight binary or Makefile target is required.
+
+Startup validates:
+
+- validator JSON wrapper
+- runtime TOML config
+- plugin library path
+- admin bind address
+- ksqlDB startup restore when `ksql.url` is configured
+- Kafka bootstrap/topic readiness
+- local RPC URL syntax only, not local RPC liveness
+
+The local RPC endpoint is not required to be reachable during startup checks because it belongs to the validator being launched.
+
+### Safe-start manual test matrix
+
+| Scenario | Temporary change | Expected prefix |
+| --- | --- | --- |
+| malformed validator JSON | invalid JSON in wrapper copy | Agave rejects the wrapper before plugin load with `FailedToLoadPlugin`; no segfault |
+| missing runtime TOML | JSON `config_file` points to missing TOML | `ERROR config startup check failed` |
+| malformed runtime TOML | invalid TOML in runtime copy | `ERROR config startup check failed` |
+| missing Kafka bootstrap | empty `kafka.bootstrap_servers` | `ERROR config startup check failed` |
+| Kafka down | no Kafka on configured bootstrap | `ERROR kafka startup check failed` |
+| ksqlDB down | `ksql.url = "http://127.0.0.1:1"` | `ERROR ksql startup check failed` |
+| invalid ksql table | `table = "bad-name"` | `ERROR config startup check failed` |
+| admin port in use | keep listener on configured port | `ERROR admin startup check failed` |
+| malformed local RPC URL | `local_rpc_url = "127.0.0.1:8899"` | `ERROR config startup check failed` |
+
+Proof command for the original issue:
+
+```shell
+make geyser-plugin-launch
+```
+
+Expected with no dependencies running:
+
+- exits non-zero
+- prints a Kafka startup check error with action `ensure Kafka is reachable at kafka.bootstrap_servers or update kafka.bootstrap_servers`
+- validator/plugin startup exits gracefully
+- does not print `Segmentation fault`
+
+Direct validator path that must receive the same checks:
+
+```shell
+cd geyser-plugin
+solana-test-validator --log --reset --geyser-plugin-config plugin-config.json
+```
+
+Expected failures and messages must match the Makefile path because the checks live in `KafkaPlugin::on_load`.
+
+Success path:
+
+```shell
+make kafka-ready
+make geyser-plugin-launch
+```
+
 ## Whitelist Management
 
 Account inclusion is managed through the HTTP API:

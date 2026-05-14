@@ -6,7 +6,7 @@ use {
         producer::{DeliveryResult, ProducerContext},
         statistics::Statistics,
     },
-    std::sync::Once,
+    std::sync::OnceLock,
 };
 
 lazy_static::lazy_static! {
@@ -58,38 +58,44 @@ lazy_static::lazy_static! {
     ).unwrap();
 }
 
-pub fn register_metrics() {
-    static REGISTER: Once = Once::new();
-    REGISTER.call_once(|| {
-        macro_rules! register {
-            ($collector:ident) => {
-                REGISTRY
-                    .register(Box::new($collector.clone()))
-                    .expect("collector can't be registered");
-            };
-        }
-        register!(VERSION);
-        register!(UPLOAD_ACCOUNTS_TOTAL);
-        register!(INITIAL_BACKFILL_REQUESTS_ENQUEUED_TOTAL);
-        register!(INITIAL_BACKFILL_PUBKEYS_ENQUEUED_TOTAL);
-        register!(INITIAL_BACKFILL_RPC_ATTEMPTS_TOTAL);
-        register!(INITIAL_BACKFILL_RPC_FAILURES_TOTAL);
-        register!(INITIAL_BACKFILL_SNAPSHOTS_TOTAL);
-        register!(INITIAL_BACKFILL_IN_FLIGHT);
-        register!(KAFKA_STATS);
+pub fn register_metrics() -> Result<(), String> {
+    static REGISTER_RESULT: OnceLock<Result<(), String>> = OnceLock::new();
+    REGISTER_RESULT
+        .get_or_init(|| {
+            register_all_metrics().map_err(|error| error.to_string())
+        })
+        .clone()
+}
 
-        for (key, value) in &[
-            ("version", VERSION_INFO.version),
-            ("solana", VERSION_INFO.solana),
-            ("git", VERSION_INFO.git),
-            ("rustc", VERSION_INFO.rustc),
-            ("buildts", VERSION_INFO.buildts),
-        ] {
-            VERSION
-                .with_label_values(&[key.to_string(), value.to_string()])
-                .inc();
-        }
-    });
+fn register_all_metrics() -> Result<(), prometheus::Error> {
+    macro_rules! register {
+        ($collector:ident) => {
+            REGISTRY.register(Box::new($collector.clone()))?;
+        };
+    }
+    register!(VERSION);
+    register!(UPLOAD_ACCOUNTS_TOTAL);
+    register!(INITIAL_BACKFILL_REQUESTS_ENQUEUED_TOTAL);
+    register!(INITIAL_BACKFILL_PUBKEYS_ENQUEUED_TOTAL);
+    register!(INITIAL_BACKFILL_RPC_ATTEMPTS_TOTAL);
+    register!(INITIAL_BACKFILL_RPC_FAILURES_TOTAL);
+    register!(INITIAL_BACKFILL_SNAPSHOTS_TOTAL);
+    register!(INITIAL_BACKFILL_IN_FLIGHT);
+    register!(KAFKA_STATS);
+
+    for (key, value) in &[
+        ("version", VERSION_INFO.version),
+        ("solana", VERSION_INFO.solana),
+        ("git", VERSION_INFO.git),
+        ("rustc", VERSION_INFO.rustc),
+        ("buildts", VERSION_INFO.buildts),
+    ] {
+        VERSION
+            .with_label_values(&[key.to_string(), value.to_string()])
+            .inc();
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Default, Clone, Copy)]
