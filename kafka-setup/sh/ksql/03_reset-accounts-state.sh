@@ -29,9 +29,13 @@ done
 echo "ksqlDB is ready."
 
 QUERIES_OUTPUT="$($DC run --rm ksqldb-cli ksql "${KSQL_SERVER_URL}" -e "SHOW QUERIES;")"
-if printf '%s\n' "$QUERIES_OUTPUT" | grep -q 'CTAS_' && printf '%s\n' "$QUERIES_OUTPUT" | grep -q 'ACCOUNTS'; then
-  echo "Terminating persistent ACCOUNTS query..."
-  $DC run --rm ksqldb-cli ksql "${KSQL_SERVER_URL}" -e "TERMINATE CTAS_ACCOUNTS_1;"
+ACCOUNT_QUERIES="$(printf '%s\n' "$QUERIES_OUTPUT" | grep -Eo 'CTAS_[^[:space:]|;]*ACCOUNTS[^[:space:]|;]*' | sort -u || true)"
+if [[ -n "$ACCOUNT_QUERIES" ]]; then
+  while IFS= read -r query_name; do
+    [[ -z "$query_name" ]] && continue
+    echo "Terminating persistent ACCOUNTS query '${query_name}'..."
+    $DC run --rm ksqldb-cli ksql "${KSQL_SERVER_URL}" -e "TERMINATE ${query_name};"
+  done <<< "$ACCOUNT_QUERIES"
 else
   echo "No persistent ACCOUNTS query found; skipping terminate."
 fi
