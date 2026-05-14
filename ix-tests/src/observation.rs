@@ -44,7 +44,11 @@ impl ClientLog {
 
     pub fn snapshot_from(&self, start_index: usize) -> Vec<ObservedUpdate> {
         let guard = self.entries.lock().unwrap();
-        guard[start_index..].to_vec()
+        if start_index >= guard.len() {
+            Vec::new()
+        } else {
+            guard[start_index..].to_vec()
+        }
     }
 
     /// Takes the next update in the order it came in
