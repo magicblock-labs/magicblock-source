@@ -94,24 +94,32 @@ impl KafkaAccountUpdateStream {
     /// does not consume any messages.
     #[allow(dead_code)]
     pub fn probe(&self) -> GeykagResult<()> {
+        Self::probe_config(&self.config)
+    }
+
+    /// Verify that the configured Kafka broker is reachable by
+    /// requesting cluster metadata. Does not subscribe to the topic and
+    /// does not consume any messages.
+    #[allow(dead_code)]
+    pub fn probe_config(config: &KafkaConfig) -> GeykagResult<()> {
         use rdkafka::consumer::BaseConsumer;
         use rdkafka::consumer::Consumer as _;
         use std::time::Duration;
 
         let mut client_config = ClientConfig::new();
-        for (key, value) in &self.config.client {
+        for (key, value) in &config.client {
             client_config.set(key, value);
         }
         client_config
-            .set("bootstrap.servers", &self.config.bootstrap_servers)
-            .set("group.id", &self.config.group_id)
-            .set("auto.offset.reset", &self.config.auto_offset_reset)
+            .set("bootstrap.servers", &config.bootstrap_servers)
+            .set("group.id", &config.group_id)
+            .set("auto.offset.reset", &config.auto_offset_reset)
             .set("enable.auto.commit", "false");
 
         let consumer: BaseConsumer =
             client_config.create().map_err(|source| {
                 GeykagError::KafkaConsumerCreate {
-                    broker: self.config.bootstrap_servers.clone(),
+                    broker: config.bootstrap_servers.clone(),
                     source,
                 }
             })?;
@@ -120,7 +128,7 @@ impl KafkaAccountUpdateStream {
             .fetch_metadata(None, Duration::from_secs(2))
             .map(|_| ())
             .map_err(|source| GeykagError::PreflightKafkaMetadata {
-                broker: self.config.bootstrap_servers.clone(),
+                broker: config.bootstrap_servers.clone(),
                 source,
             })
     }
