@@ -100,21 +100,26 @@ impl TestGrpcClient {
                                 .unwrap_or_default()
                                 .as_millis();
 
-                            let Some(pubkey_b58) = pubkey_str(&info.pubkey) else {
+                            let Some(pubkey_b58) = pubkey_str(&info.pubkey)
+                            else {
                                 continue;
                             };
-                            let Some(owner_b58) = pubkey_str(&info.owner) else {
+                            let Some(owner_b58) = pubkey_str(&info.owner)
+                            else {
                                 continue;
                             };
-                            let txn_signature_b58 = match info.txn_signature.as_ref() {
-                                Some(signature) => {
-                                    let Some(signature_b58) = txn_signature_str(signature) else {
-                                        continue;
-                                    };
-                                    Some(signature_b58)
-                                }
-                                None => None,
-                            };
+                            let txn_signature_b58 =
+                                match info.txn_signature.as_ref() {
+                                    Some(signature) => {
+                                        let Some(signature_b58) =
+                                            txn_signature_str(signature)
+                                        else {
+                                            continue;
+                                        };
+                                        Some(signature_b58)
+                                    }
+                                    None => None,
+                                };
 
                             let observed = ObservedUpdate {
                                 client_id: id,
