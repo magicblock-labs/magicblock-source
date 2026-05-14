@@ -6,6 +6,7 @@ set -euo pipefail
 
 STREAM="${STREAM:-account_updates_stream}"
 TABLE="${TABLE:-accounts}"
+STREAM_UPPER="$(printf '%s' "$STREAM" | tr '[:lower:]' '[:upper:]')"
 TABLE_UPPER="$(printf '%s' "$TABLE" | tr '[:lower:]' '[:upper:]')"
 KSQL_SERVER_URL="${KSQL_SERVER_URL:-http://ksqldb-server:8088}"
 
@@ -52,7 +53,7 @@ else
 fi
 
 STREAMS_OUTPUT="$($DC run --rm ksqldb-cli ksql "${KSQL_SERVER_URL}" -e "SHOW STREAMS;")"
-if printf '%s\n' "$STREAMS_OUTPUT" | grep -q "ACCOUNT_UPDATES_STREAM"; then
+if printf '%s\n' "$STREAMS_OUTPUT" | grep -q "${STREAM_UPPER}"; then
   echo "Dropping stream '${STREAM}'..."
   $DC run --rm ksqldb-cli ksql "${KSQL_SERVER_URL}" -e "DROP STREAM ${STREAM};"
 else
