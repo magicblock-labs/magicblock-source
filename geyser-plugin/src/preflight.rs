@@ -92,7 +92,7 @@ pub(crate) fn run_static_startup_checks(
             Some("libpath"),
             Some(paths.libpath.display().to_string()),
             "plugin shared library does not exist",
-            "run make geyser-plugin-build or update libpath in the validator JSON wrapper",
+            "build the plugin shared library or update libpath in the validator JSON wrapper",
         ));
     }
     Ok(loaded)
@@ -128,7 +128,7 @@ pub fn check_ksql_readiness(
             Some("ksql.url"),
             Some(url.to_owned()),
             format!("failed to run startup restore query: {error}"),
-            "start ksqlDB with make kafka-ready, fix ksql.url/ksql.table, or remove ksql.url to disable startup restore",
+            "ensure ksqlDB is reachable at ksql.url, fix ksql.url/ksql.table, or remove ksql.url to disable startup restore",
         )
     })?;
 
@@ -138,7 +138,7 @@ pub fn check_ksql_readiness(
             Some("ksql.url"),
             Some(url.to_owned()),
             format!("failed to run startup restore query: {error}"),
-            "start ksqlDB with make kafka-ready, fix ksql.url/ksql.table, or remove ksql.url to disable startup restore",
+            "ensure ksqlDB is reachable at ksql.url, fix ksql.url/ksql.table, or remove ksql.url to disable startup restore",
         )
     })?;
 
@@ -180,7 +180,7 @@ pub fn check_kafka_readiness(
             format!(
                 "failed to create kafka producer for readiness check: {error}"
             ),
-            "fix kafka.bootstrap_servers or kafka.client settings in geyser-plugin/plugin-config.toml",
+            "fix kafka.bootstrap_servers or kafka.client settings",
         )
     })?;
 
@@ -196,7 +196,7 @@ pub fn check_kafka_readiness(
                 Some("kafka.bootstrap_servers"),
                 Some(config.kafka.bootstrap_servers.clone()),
                 format!("failed to fetch kafka metadata: {error}"),
-                "start Kafka with make kafka-ready or update kafka.bootstrap_servers in geyser-plugin/plugin-config.toml",
+                "ensure Kafka is reachable at kafka.bootstrap_servers or update kafka.bootstrap_servers",
             ));
         }
     };
@@ -533,7 +533,7 @@ admin = "127.0.0.1:8080"
                 .ends_with("missing-plugin.so")
         );
         assert_eq!(error.cause, "plugin shared library does not exist");
-        assert!(error.action.contains("make geyser-plugin-build"));
+        assert!(error.action.contains("build the plugin shared library"));
 
         fs::remove_dir_all(&base).unwrap();
     }

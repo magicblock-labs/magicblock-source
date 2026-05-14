@@ -162,7 +162,7 @@ make geyser-plugin-launch
 Expected with no dependencies running:
 
 - exits non-zero
-- prints a Kafka startup check error with action `make kafka-ready`
+- prints a Kafka startup check error with action `ensure Kafka is reachable at kafka.bootstrap_servers or update kafka.bootstrap_servers`
 - validator/plugin startup exits gracefully
 - does not print `Segmentation fault`
 
