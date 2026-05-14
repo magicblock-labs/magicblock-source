@@ -50,10 +50,11 @@ impl ClientLog {
     /// Takes the next update in the order it came in
     /// Removes and returns it from the log
     pub fn consume_next_update(&self) -> Option<ObservedUpdate> {
-        if self.entries.lock().unwrap().is_empty() {
+        let mut guard = self.entries.lock().unwrap();
+        if guard.is_empty() {
             None
         } else {
-            Some(self.entries.lock().unwrap().remove(0))
+            Some(guard.remove(0))
         }
     }
 
