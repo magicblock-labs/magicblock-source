@@ -79,7 +79,7 @@ impl RunArtifacts {
     }
 
     pub fn dump_service_logs_at(paths: &ServiceLogPaths) -> anyhow::Result<()> {
-        for path in &[&paths.stdout, &paths.stderr] {
+        for path in [&paths.stdout, &paths.stderr] {
             if path.exists() {
                 let content =
                     std::fs::read_to_string(path).with_context(|| {
