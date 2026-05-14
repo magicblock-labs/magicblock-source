@@ -32,17 +32,20 @@ pub async fn run(ctx: &ScenarioContext) -> Result<(), ScenarioFailure> {
     let mut service = Some(service);
     let mut clients = Vec::new();
 
-    let result = run_inner(ctx, &spec.endpoint, &mut clients).await;
-    if let Err(error) = result {
-        return Err(ScenarioFailure { error, clients });
+    let outcome = run_inner(ctx, &spec.endpoint, &mut clients).await;
+    let shutdown_clients_result = shutdown_clients(clients).await;
+    let shutdown_service_result =
+        shutdown_service(&ctx.service_controller, &mut service).await;
+
+    if let Err(error) = outcome {
+        return Err(ScenarioFailure {
+            error,
+            clients: Vec::new(),
+        });
     }
 
-    shutdown_clients(clients)
-        .await
-        .map_err(scenario_failure_without_clients)?;
-    shutdown_service(&ctx.service_controller, &mut service)
-        .await
-        .map_err(scenario_failure_without_clients)?;
+    shutdown_clients_result.map_err(scenario_failure_without_clients)?;
+    shutdown_service_result.map_err(scenario_failure_without_clients)?;
     Ok(())
 }
 
