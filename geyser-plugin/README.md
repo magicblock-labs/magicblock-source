@@ -143,7 +143,7 @@ The local RPC endpoint is not required to be reachable during startup checks bec
 
 | Scenario | Temporary change | Expected prefix |
 | --- | --- | --- |
-| malformed validator JSON | invalid JSON in wrapper copy | `ERROR config startup check failed` |
+| malformed validator JSON | invalid JSON in wrapper copy | Agave rejects the wrapper before plugin load with `FailedToLoadPlugin`; no segfault |
 | missing runtime TOML | JSON `config_file` points to missing TOML | `ERROR config startup check failed` |
 | malformed runtime TOML | invalid TOML in runtime copy | `ERROR config startup check failed` |
 | missing Kafka bootstrap | empty `kafka.bootstrap_servers` | `ERROR config startup check failed` |

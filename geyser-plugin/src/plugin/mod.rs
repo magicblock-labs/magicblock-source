@@ -89,6 +89,9 @@ impl GeyserPlugin for KafkaPlugin {
             self.name(),
             config_file
         );
+        let (version_n, version_s) = get_rdkafka_version();
+        info!("rd_kafka_version: {:#08x}, {}", version_n, version_s);
+
         let loaded = crate::preflight::run_static_startup_checks(config_file)
             .map_err(startup_error_to_plugin_error)?;
         let config = loaded.config;
@@ -96,13 +99,12 @@ impl GeyserPlugin for KafkaPlugin {
         crate::preflight::check_admin_bind(&config)
             .map_err(startup_error_to_plugin_error)?;
 
-        let (version_n, version_s) = get_rdkafka_version();
-        info!("rd_kafka_version: {:#08x}, {}", version_n, version_s);
-
-        let prefetched_restore = Self::fetch_tracking_from_ksql(&config)?;
-
         crate::preflight::check_kafka_readiness(&config)
             .map_err(startup_error_to_plugin_error)?;
+        crate::preflight::check_ksql_readiness(&config)
+            .map_err(startup_error_to_plugin_error)?;
+
+        let prefetched_restore = Self::fetch_tracking_from_ksql(&config)?;
 
         let producer_config = build_producer_config(&config);
         let producer =
@@ -319,10 +321,7 @@ fn startup_error_to_plugin_error(
     error: crate::preflight::StartupError,
 ) -> PluginError {
     error!("{error}");
-    if error.subsystem == "kafka" {
-        std::process::exit(1);
-    }
-    PluginError::Custom(Box::new(std::io::Error::other(error.to_string())))
+    std::process::exit(1);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
