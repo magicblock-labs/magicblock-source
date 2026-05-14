@@ -6,6 +6,7 @@ set -euo pipefail
 
 STREAM="${STREAM:-account_updates_stream}"
 TABLE="${TABLE:-accounts}"
+TABLE_UPPER="$(printf '%s' "$TABLE" | tr '[:lower:]' '[:upper:]')"
 KSQL_SERVER_URL="${KSQL_SERVER_URL:-http://ksqldb-server:8088}"
 
 if command -v docker-compose >/dev/null 2>&1; then
@@ -43,11 +44,11 @@ fi
 sleep 2
 
 TABLES_OUTPUT="$($DC run --rm ksqldb-cli ksql "${KSQL_SERVER_URL}" -e "SHOW TABLES;")"
-if printf '%s\n' "$TABLES_OUTPUT" | grep -q "ACCOUNTS"; then
-  echo "Dropping table '${TABLE}'..."
-  $DC run --rm ksqldb-cli ksql "${KSQL_SERVER_URL}" -e "DROP TABLE ${TABLE} DELETE TOPIC;"
+if printf '%s\n' "$TABLES_OUTPUT" | grep -q "${TABLE_UPPER}"; then
+  echo "Dropping table '${TABLE_UPPER}'..."
+  $DC run --rm ksqldb-cli ksql "${KSQL_SERVER_URL}" -e "DROP TABLE ${TABLE_UPPER} DELETE TOPIC;"
 else
-  echo "Table '${TABLE}' does not exist; skipping drop."
+  echo "Table '${TABLE_UPPER}' does not exist; skipping drop."
 fi
 
 STREAMS_OUTPUT="$($DC run --rm ksqldb-cli ksql "${KSQL_SERVER_URL}" -e "SHOW STREAMS;")"
