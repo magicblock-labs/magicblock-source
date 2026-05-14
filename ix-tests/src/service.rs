@@ -390,48 +390,80 @@ impl ServiceController {
         let deadline = tokio::time::Instant::now() + self.service_start_timeout;
         let mut announced_waiting = false;
 
+        enum ReadinessProbeResult {
+            Ready,
+            ConnectError(tonic::transport::Error),
+            PingError(tonic::Status),
+        }
+
         loop {
-            match GeyserClient::connect(endpoint.to_owned()).await {
-                Ok(mut client) => {
-                    match client.ping(PingRequest { count: 1 }).await {
-                        Ok(_) => {
-                            info!(endpoint, "grpc-service is ready");
-                            return Ok(());
-                        }
-                        Err(err) if err.code() == tonic::Code::Unavailable => {
-                            if !announced_waiting {
-                                info!(
-                                    endpoint,
-                                    message = %err.message(),
-                                    "grpc-service listening but not yet ready; waiting for startup preflight"
-                                );
-                                announced_waiting = true;
-                            } else {
-                                debug!(
-                                    endpoint,
-                                    message = %err.message(),
-                                    "grpc-service still preflight-pending"
-                                );
-                            }
-                        }
-                        Err(err) => {
-                            warn!(
-                                endpoint,
-                                "ping returned non-readiness error: {err}"
-                            );
+            let attempt_timeout =
+                deadline.saturating_duration_since(tokio::time::Instant::now());
+            let probe = async {
+                match GeyserClient::connect(endpoint.to_owned()).await {
+                    Ok(mut client) => {
+                        match client.ping(PingRequest { count: 1 }).await {
+                            Ok(_) => ReadinessProbeResult::Ready,
+                            Err(err) => ReadinessProbeResult::PingError(err),
                         }
                     }
+                    Err(err) => ReadinessProbeResult::ConnectError(err),
                 }
-                Err(err) => {
+            };
+
+            match tokio::time::timeout(attempt_timeout, probe).await {
+                Ok(ReadinessProbeResult::Ready) => {
+                    info!(endpoint, "grpc-service is ready");
+                    return Ok(());
+                }
+                Ok(ReadinessProbeResult::PingError(err))
+                    if err.code() == tonic::Code::Unavailable =>
+                {
+                    if !announced_waiting {
+                        info!(
+                            endpoint,
+                            message = %err.message(),
+                            "grpc-service listening but not yet ready; waiting for startup preflight"
+                        );
+                        announced_waiting = true;
+                    } else {
+                        debug!(
+                            endpoint,
+                            message = %err.message(),
+                            "grpc-service still preflight-pending"
+                        );
+                    }
+                }
+                Ok(ReadinessProbeResult::PingError(err)) => {
+                    warn!(endpoint, "ping returned non-readiness error: {err}");
+                }
+                Ok(ReadinessProbeResult::ConnectError(err)) => {
                     debug!(
                         endpoint,
                         "grpc-service not yet accepting connections: {err}"
                     );
                 }
+                Err(_) => {
+                    if !announced_waiting {
+                        info!(
+                            endpoint,
+                            timeout = ?attempt_timeout,
+                            "grpc-service readiness probe timed out; waiting for startup"
+                        );
+                        announced_waiting = true;
+                    } else {
+                        debug!(
+                            endpoint,
+                            timeout = ?attempt_timeout,
+                            "grpc-service readiness probe still timing out"
+                        );
+                    }
+                }
             }
 
             if tokio::time::Instant::now() >= deadline {
-                if let Err(err) = RunArtifacts::dump_service_logs_at(log_paths) {
+                if let Err(err) = RunArtifacts::dump_service_logs_at(log_paths)
+                {
                     warn!(
                         endpoint,
                         error = %err,
