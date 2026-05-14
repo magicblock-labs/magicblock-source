@@ -69,6 +69,63 @@ pub enum GeykagError {
         #[source]
         source: reqwest::Error,
     },
+    #[allow(dead_code)]
+    #[error("startup preflight HTTP client build failed")]
+    PreflightClientBuild {
+        #[source]
+        source: reqwest::Error,
+    },
+    #[allow(dead_code)]
+    #[error("validator plugin admin probe to {url} failed")]
+    PreflightValidatorPluginRequest {
+        url: String,
+        #[source]
+        source: reqwest::Error,
+    },
+    #[allow(dead_code)]
+    #[error(
+        "validator plugin admin probe to {url} returned non-success status"
+    )]
+    PreflightValidatorPluginStatus {
+        url: String,
+        #[source]
+        source: reqwest::Error,
+    },
+    #[allow(dead_code)]
+    #[error("validator RPC probe to {url} failed")]
+    PreflightValidatorRpcRequest {
+        url: String,
+        #[source]
+        source: reqwest::Error,
+    },
+    #[allow(dead_code)]
+    #[error("validator RPC probe to {url} returned non-success status")]
+    PreflightValidatorRpcStatus {
+        url: String,
+        #[source]
+        source: reqwest::Error,
+    },
+    #[allow(dead_code)]
+    #[error("Kafka broker {broker} metadata probe failed")]
+    PreflightKafkaMetadata {
+        broker: String,
+        #[source]
+        source: KafkaError,
+    },
+    #[allow(dead_code)]
+    #[error("Kafka metadata probe task failed")]
+    PreflightKafkaProbeJoin {
+        #[source]
+        source: tokio::task::JoinError,
+    },
+    #[allow(dead_code)]
+    #[error(
+        "startup preflight timed out after {elapsed_ms} ms; last failing probe: {probe}"
+    )]
+    PreflightTimeout {
+        probe: &'static str,
+        elapsed_ms: u128,
+    },
     #[error("failed to parse ksqlDB response line as JSON: {line}")]
     KsqlJsonLine {
         line: String,

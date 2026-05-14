@@ -16,6 +16,7 @@ use tonic::transport::Server;
 
 use super::dispatcher::DispatcherHandle;
 use super::init_subs::InitSubsClient;
+use super::readiness::ServiceReadiness;
 use super::service::GrpcSubscriptionService;
 use super::sink::GrpcSink;
 
@@ -72,10 +73,12 @@ impl GrpcService {
             KsqlAccountSnapshotClient::new(config.ksql.clone())?;
         let validator_subscriptions =
             InitSubsClient::new(config.validator.accounts_filter_url.clone())?;
+        let readiness = ServiceReadiness::new();
         let service = GrpcSubscriptionService::new(
             dispatcher,
             snapshot_store,
             validator_subscriptions,
+            readiness.clone(),
         )
         .into_server();
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -94,6 +97,7 @@ impl GrpcService {
 
         Ok(GrpcServiceHandle {
             sink,
+            readiness,
             is_running,
             shutdown_tx: Some(shutdown_tx),
             task: Some(task),
@@ -105,6 +109,7 @@ impl GrpcService {
 #[derive(Debug)]
 pub struct GrpcServiceHandle {
     sink: GrpcSink,
+    readiness: ServiceReadiness,
     is_running: Arc<AtomicBool>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     task: Option<JoinHandle<Result<(), tonic::transport::Error>>>,
@@ -114,6 +119,10 @@ pub struct GrpcServiceHandle {
 impl GrpcServiceHandle {
     pub fn sink(&self) -> GrpcSink {
         self.sink.clone()
+    }
+
+    pub fn readiness(&self) -> ServiceReadiness {
+        self.readiness.clone()
     }
 
     #[allow(dead_code)]

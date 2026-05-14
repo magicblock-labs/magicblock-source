@@ -4,21 +4,142 @@ use magigblock_event_proto::{
 };
 use prost::Message;
 use rdkafka::Message as KafkaMessage;
+use rdkafka::client::ClientContext;
 use rdkafka::config::ClientConfig;
-use rdkafka::consumer::{Consumer, StreamConsumer};
-use tracing::{error, info, warn};
+use rdkafka::consumer::{Consumer, ConsumerContext, Rebalance, StreamConsumer};
+use rdkafka::topic_partition_list::TopicPartitionList;
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info, warn};
 
 use crate::config::KafkaConfig;
 use crate::domain::{AccountUpdate, PubkeyFilter, bytes_to_base58};
 use crate::errors::{GeykagError, GeykagResult};
+use crate::grpc_service::ServiceReadiness;
 use crate::traits::AccountUpdateSource;
+
+struct ReadinessConsumerContext {
+    readiness: ServiceReadiness,
+    group_id: String,
+}
+
+impl ClientContext for ReadinessConsumerContext {}
+
+impl ConsumerContext for ReadinessConsumerContext {
+    fn post_rebalance(
+        &self,
+        _base_consumer: &rdkafka::consumer::BaseConsumer<Self>,
+        rebalance: &Rebalance<'_>,
+    ) {
+        match rebalance {
+            Rebalance::Assign(assignment) => {
+                if assignment.count() == 0 {
+                    self.readiness.mark_kafka_not_ready();
+                } else {
+                    self.readiness.mark_kafka_ready();
+                    info!(
+                        group_id = self.group_id,
+                        partitions = ?topic_partition_list(assignment),
+                        "Kafka partitions assigned"
+                    );
+                }
+            }
+            Rebalance::Revoke(partitions) => {
+                self.readiness.mark_kafka_not_ready();
+                info!(
+                    group_id = self.group_id,
+                    partitions = ?topic_partition_list(partitions),
+                    "Kafka partitions revoked"
+                );
+            }
+            Rebalance::Error(err) => {
+                self.readiness.mark_kafka_not_ready();
+                warn!(
+                    group_id = self.group_id,
+                    error = %err,
+                    "Kafka consumer lost readiness during rebalance"
+                );
+            }
+        }
+    }
+}
+
+fn topic_partition_list(partitions: &TopicPartitionList) -> Vec<String> {
+    partitions
+        .elements()
+        .iter()
+        .map(|partition| {
+            format!("{}:{}", partition.topic(), partition.partition())
+        })
+        .collect()
+}
+
 pub struct KafkaAccountUpdateStream {
     config: KafkaConfig,
+    readiness: ServiceReadiness,
+    shutdown: CancellationToken,
 }
 
 impl KafkaAccountUpdateStream {
-    pub fn new(config: KafkaConfig) -> Self {
-        Self { config }
+    pub fn new(
+        config: KafkaConfig,
+        readiness: ServiceReadiness,
+        shutdown: CancellationToken,
+    ) -> Self {
+        Self {
+            config,
+            readiness,
+            shutdown,
+        }
+    }
+
+    /// Verify that the configured Kafka broker is reachable by
+    /// requesting cluster metadata. Does not subscribe to the topic and
+    /// does not consume any messages.
+    #[allow(dead_code)]
+    pub async fn probe(&self) -> GeykagResult<()> {
+        Self::probe_config(&self.config).await
+    }
+
+    /// Verify that the configured Kafka broker is reachable by
+    /// requesting cluster metadata. Does not subscribe to the topic and
+    /// does not consume any messages.
+    #[allow(dead_code)]
+    pub async fn probe_config(config: &KafkaConfig) -> GeykagResult<()> {
+        use rdkafka::consumer::BaseConsumer;
+        use rdkafka::consumer::Consumer as _;
+        use std::time::Duration;
+
+        let config = config.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let mut client_config = ClientConfig::new();
+            for (key, value) in &config.client {
+                client_config.set(key, value);
+            }
+            client_config
+                .set("bootstrap.servers", &config.bootstrap_servers)
+                .set("group.id", &config.group_id)
+                .set("auto.offset.reset", &config.auto_offset_reset)
+                .set("enable.auto.commit", "false");
+
+            let consumer: BaseConsumer =
+                client_config.create().map_err(|source| {
+                    GeykagError::KafkaConsumerCreate {
+                        broker: config.bootstrap_servers.clone(),
+                        source,
+                    }
+                })?;
+
+            consumer
+                .fetch_metadata(None, Duration::from_secs(2))
+                .map(|_| ())
+                .map_err(|source| GeykagError::PreflightKafkaMetadata {
+                    broker: config.bootstrap_servers.clone(),
+                    source,
+                })
+        })
+        .await
+        .map_err(|source| GeykagError::PreflightKafkaProbeJoin { source })?
     }
 
     pub async fn run<H>(
@@ -39,13 +160,23 @@ impl KafkaAccountUpdateStream {
             .set("auto.offset.reset", &self.config.auto_offset_reset)
             .set("enable.auto.commit", "true");
 
-        let consumer: StreamConsumer =
-            client_config.create().map_err(|source| {
-                GeykagError::KafkaConsumerCreate {
-                    broker: self.config.bootstrap_servers.clone(),
-                    source,
-                }
+        let consumer: StreamConsumer<ReadinessConsumerContext> = client_config
+            .create_with_context(ReadinessConsumerContext {
+                readiness: self.readiness.clone(),
+                group_id: self.config.group_id.clone(),
+            })
+            .map_err(|source| GeykagError::KafkaConsumerCreate {
+                broker: self.config.bootstrap_servers.clone(),
+                source,
             })?;
+
+        info!(
+            broker = self.config.bootstrap_servers,
+            topic = self.config.topic,
+            group_id = self.config.group_id,
+            auto_offset_reset = self.config.auto_offset_reset,
+            "Kafka consumer created"
+        );
 
         consumer
             .subscribe(&[&self.config.topic])
@@ -55,52 +186,73 @@ impl KafkaAccountUpdateStream {
             })?;
 
         info!(
-            broker = self.config.bootstrap_servers,
             topic = self.config.topic,
             group_id = self.config.group_id,
-            auto_offset_reset = self.config.auto_offset_reset,
-            pubkey_filter =
-                filter.map(PubkeyFilter::as_str).unwrap_or("(none)"),
-            "listening for Kafka messages"
+            "Kafka subscribe issued"
         );
 
         let mut stream = consumer.stream();
-        while let Some(message) = stream.next().await {
-            match message {
-                Ok(msg) => {
-                    let Some(payload) = msg.payload() else {
-                        warn!(
-                            partition = msg.partition(),
-                            offset = msg.offset(),
-                            "skipping empty payload"
-                        );
-                        continue;
+        loop {
+            tokio::select! {
+                _ = self.shutdown.cancelled() => {
+                    info!(
+                        group_id = self.config.group_id,
+                        topic = self.config.topic,
+                        "Kafka consumer shutdown requested"
+                    );
+                    break;
+                }
+                message = stream.next() => {
+                    let Some(message) = message else {
+                        break;
                     };
 
-                    match decode_account_update(payload) {
-                        Ok(account) => {
-                            if !account.matches_filter(filter) {
+                    match message {
+                        Ok(msg) => {
+                            let Some(payload) = msg.payload() else {
+                                warn!(
+                                    partition = msg.partition(),
+                                    offset = msg.offset(),
+                                    "skipping empty payload"
+                                );
                                 continue;
-                            }
+                            };
 
-                            handler(StreamMessage {
-                                account,
-                                partition: msg.partition(),
-                                offset: msg.offset(),
-                                timestamp: format!("{:?}", msg.timestamp()),
-                            })?;
+                            match decode_account_update(payload) {
+                                Ok(account) => {
+                                    if !account.matches_filter(filter) {
+                                        continue;
+                                    }
+
+                                    debug!(
+                                        group_id = self.config.group_id,
+                                        partition = msg.partition(),
+                                        offset = msg.offset(),
+                                        pubkey = %account.pubkey_b58,
+                                        write_version = account.write_version,
+                                        "Kafka message consumed"
+                                    );
+
+                                    handler(StreamMessage {
+                                        account,
+                                        partition: msg.partition(),
+                                        offset: msg.offset(),
+                                        timestamp: format!("{:?}", msg.timestamp()),
+                                    })?;
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        partition = msg.partition(),
+                                        offset = msg.offset(),
+                                        error = %err,
+                                        "failed to decode message payload"
+                                    );
+                                }
+                            }
                         }
-                        Err(err) => {
-                            warn!(
-                                partition = msg.partition(),
-                                offset = msg.offset(),
-                                error = %err,
-                                "failed to decode message payload"
-                            );
-                        }
+                        Err(err) => error!(error = %err, "Kafka consumer error"),
                     }
                 }
-                Err(err) => error!(error = %err, "Kafka consumer error"),
             }
         }
 

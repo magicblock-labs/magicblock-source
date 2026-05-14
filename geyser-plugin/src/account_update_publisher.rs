@@ -69,8 +69,9 @@ fn publish_raw_account_update(
 ) -> PluginResult<()> {
     if let Ok(key) = <[u8; 32]>::try_from(event.pubkey.as_slice()) {
         debug!(
-            "Matched account update {} in slot {}",
+            "Matched account update {} lamports {} in slot {}",
             Pubkey::new_from_array(key),
+            event.lamports,
             event.slot
         );
     }

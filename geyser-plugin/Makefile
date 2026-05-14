@@ -1,5 +1,7 @@
 .PHONY: help build build-plugin launch init-config clean
 
+MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
 	PLUGIN_EXT := so
@@ -17,14 +19,6 @@ help:
 	@echo "  make build-plugin - Compile the plugin (.so/.dylib)"
 	@echo "  make launch       - Launch solana-test-validator with the plugin (depends on build-plugin)"
 	@echo "  make clean        - Remove compiled artifacts"
-
-init-config:
-	@echo "Creating $(PLUGIN_CONFIG)..."
-	@perl -0pe 's#(?<!\.\./)target/release/libsolana_accountsdb_plugin_kafka\.(?:dylib|so)#$(PLUGIN_PATH)#g' configs/plugin-config.example.toml > "$(PLUGIN_CONFIG)"
-	@echo "Creating $(VALIDATOR_CONFIG)..."
-	@perl -0pe 's#(?<!\.\./)target/release/libsolana_accountsdb_plugin_kafka\.(?:dylib|so)#$(PLUGIN_PATH)#g; s#plugin-config\.toml#$(PLUGIN_CONFIG)#g' configs/plugin-config.example.json > "$(VALIDATOR_CONFIG)"
-	@echo "✓ Created $(PLUGIN_CONFIG)"
-	@echo "✓ Created $(VALIDATOR_CONFIG)"
 
 build-plugin:
 	@echo "Building plugin for $(UNAME_S)..."
@@ -46,7 +40,25 @@ launch: build-plugin
 			exit 1; \
 		fi; \
 	fi
+	cd "$(MAKEFILE_DIR)" && \
 	solana-test-validator --log --reset --geyser-plugin-config "$(VALIDATOR_CONFIG)"
+
+init-config:
+	@echo "Creating $(VALIDATOR_CONFIG) and $(PLUGIN_CONFIG) for $(UNAME_S) (.$(PLUGIN_EXT))..."
+	@if [ -f "$(VALIDATOR_CONFIG)" ]; then \
+		echo "Error: $(VALIDATOR_CONFIG) already exists, refusing to overwrite"; \
+		exit 1; \
+	fi
+	@if [ -f "$(PLUGIN_CONFIG)" ]; then \
+		echo "Error: $(PLUGIN_CONFIG) already exists, refusing to overwrite"; \
+		exit 1; \
+	fi
+	@sed -e 's|path-to-plugin-library|$(PLUGIN_PATH)|' \
+		-e 's|plugin-config.toml|$(PLUGIN_CONFIG)|' \
+		./configs/plugin-config.example.json > "$(VALIDATOR_CONFIG)"
+	@cp ./configs/plugin-config.example.toml "$(PLUGIN_CONFIG)"
+	@echo "Created $(VALIDATOR_CONFIG) (libpath: $(PLUGIN_PATH))"
+	@echo "Created $(PLUGIN_CONFIG)"
 
 clean:
 	cargo clean

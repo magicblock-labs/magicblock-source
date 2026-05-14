@@ -14,6 +14,7 @@ const DEFAULT_KSQL_URL: &str = "http://localhost:8088";
 const DEFAULT_KSQL_TABLE: &str = "ACCOUNTS";
 const DEFAULT_VALIDATOR_ACCOUNTS_FILTER_URL: &str =
     "http://localhost:3000/filters/accounts";
+const DEFAULT_VALIDATOR_RPC_URL: &str = "http://127.0.0.1:8899";
 const DEFAULT_AUTO_OFFSET_RESET: &str = "latest";
 const DEFAULT_GRPC_BIND_HOST: &str = "0.0.0.0";
 const DEFAULT_GRPC_PORT: u16 = 50051;
@@ -46,6 +47,8 @@ pub struct KsqlConfig {
 #[derive(Clone, Debug)]
 pub struct ValidatorConfig {
     pub accounts_filter_url: String,
+    #[allow(dead_code)]
+    pub rpc_url: String,
 }
 
 #[derive(Clone, Debug)]
@@ -97,6 +100,8 @@ struct FileKsqlConfig {
 struct FileValidatorConfig {
     #[serde(default)]
     accounts_filter_url: Option<String>,
+    #[serde(default)]
+    rpc_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -128,6 +133,7 @@ impl Config {
         });
         let validator = file.validator.unwrap_or(FileValidatorConfig {
             accounts_filter_url: None,
+            rpc_url: None,
         });
         let grpc = file.grpc.unwrap_or(FileGrpcConfig {
             bind_host: None,
@@ -161,6 +167,9 @@ impl Config {
                     .unwrap_or_else(|| {
                         DEFAULT_VALIDATOR_ACCOUNTS_FILTER_URL.to_owned()
                     }),
+                rpc_url: validator
+                    .rpc_url
+                    .unwrap_or_else(|| DEFAULT_VALIDATOR_RPC_URL.to_owned()),
             },
             grpc: GrpcConfig {
                 bind_host: grpc

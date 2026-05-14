@@ -18,6 +18,7 @@ use tracing::{debug, info, warn};
 
 use super::convert::to_subscribe_update;
 use super::dispatcher::{DispatcherHandle, TargetedSendResult};
+use super::readiness::ServiceReadiness;
 use crate::domain::{AccountEvent, PubkeyFilter};
 use crate::traits::{SnapshotStore, ValidatorSubscriptions};
 
@@ -37,6 +38,7 @@ pub(crate) struct GrpcSubscriptionService<
     dispatcher: DispatcherHandle,
     snapshot_store: P,
     validator_subscriptions: V,
+    readiness: ServiceReadiness,
 }
 
 impl<
@@ -48,11 +50,13 @@ impl<
         dispatcher: DispatcherHandle,
         snapshot_store: P,
         validator_subscriptions: V,
+        readiness: ServiceReadiness,
     ) -> Self {
         Self {
             dispatcher,
             snapshot_store,
             validator_subscriptions,
+            readiness,
         }
     }
 
@@ -101,6 +105,12 @@ async fn bootstrap_new_pubkeys_impl<
         // will publish one of two Kafka updates:
         // - the current account update if the account exists
         // - a MissingAccount update if the account does not exist
+        debug!(
+            client_id,
+            pubkey = %pubkey_b58,
+            "fetching snapshot bootstrap for pubkey"
+        );
+
         let snapshot = match snapshot_store.fetch_one_by_pubkey(&pubkey).await {
             Ok(snapshot) => snapshot,
             Err(error) => {
@@ -139,7 +149,13 @@ async fn bootstrap_new_pubkeys_impl<
             };
 
         match dispatcher.send_to_client(client_id, update).await {
-            Ok(TargetedSendResult::Delivered) => {}
+            Ok(TargetedSendResult::Delivered) => {
+                info!(
+                    client_id,
+                    pubkey = %pubkey_b58,
+                    "snapshot bootstrap dispatched"
+                );
+            }
             Ok(TargetedSendResult::ClientNotFound) => {
                 warn!(
                     client_id,
@@ -183,7 +199,8 @@ async fn bootstrap_new_pubkeys_impl<
     info!(
         client_id,
         pubkey_count = pubkeys_to_whitelist.len(),
-        "whitelisting ksql-missing pubkeys with validator"
+        pubkeys = ?pubkeys_to_whitelist,
+        "validator whitelist request starting"
     );
 
     if let Err(error) = validator_subscriptions
@@ -195,6 +212,13 @@ async fn bootstrap_new_pubkeys_impl<
             pubkey_count = pubkeys_to_whitelist.len(),
             error = %error,
             "failed to whitelist pubkeys with validator"
+        );
+    } else {
+        info!(
+            client_id,
+            pubkey_count = pubkeys_to_whitelist.len(),
+            pubkeys = ?pubkeys_to_whitelist,
+            "validator whitelist request completed"
         );
     }
 }
@@ -260,6 +284,15 @@ fn parse_pubkey_list(accounts: &[String]) -> Result<HashSet<[u8; 32]>, Status> {
     Ok(set)
 }
 
+fn normalized_pubkeys(pubkeys: &HashSet<[u8; 32]>) -> Vec<String> {
+    let mut normalized = pubkeys
+        .iter()
+        .map(|pubkey| bs58::encode(pubkey).into_string())
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized
+}
+
 enum FilterOp {
     Replace(HashSet<[u8; 32]>),
     Patch {
@@ -309,9 +342,15 @@ impl<
             })?;
 
         let initial_filter = parse_accounts_filter(&first_req)?;
+        let initial_pubkeys = normalized_pubkeys(&initial_filter);
         info!(
             filter_size = initial_filter.len(),
-            "new gRPC subscriber connected"
+            pubkeys = tracing::field::debug(if initial_pubkeys.is_empty() {
+                None::<&Vec<String>>
+            } else {
+                Some(&initial_pubkeys)
+            }),
+            "gRPC subscribe request received"
         );
 
         // 2. Register with dispatcher using parsed filter
@@ -421,9 +460,15 @@ impl<
 
     async fn ping(
         &self,
-        _request: Request<PingRequest>,
+        request: Request<PingRequest>,
     ) -> Result<Response<PongResponse>, Status> {
-        Err(Status::unimplemented("Ping is not supported"))
+        if !self.readiness.is_ready() {
+            debug!("ping rejected: service not ready");
+            return Err(Status::unavailable("service not ready"));
+        }
+        Ok(Response::new(PongResponse {
+            count: request.into_inner().count,
+        }))
     }
 
     async fn get_latest_blockhash(
@@ -474,13 +519,18 @@ mod tests {
     };
     use tokio::time::timeout;
 
+    use helius_laserstream::grpc::PingRequest;
+    use helius_laserstream::grpc::geyser_server::Geyser;
+    use tonic::Request;
+
     use super::{
-        FilterOp, bootstrap_new_pubkeys_impl, parse_accounts_filter,
-        parse_filter_op, parse_pubkey_list,
+        FilterOp, GrpcSubscriptionService, bootstrap_new_pubkeys_impl,
+        parse_accounts_filter, parse_filter_op, parse_pubkey_list,
     };
     use crate::domain::{AccountState, PubkeyFilter, bytes_to_base58};
     use crate::errors::{GeykagError, GeykagResult};
     use crate::grpc_service::dispatcher::DispatcherHandle;
+    use crate::grpc_service::readiness::ServiceReadiness;
     use crate::traits::{SnapshotStore, ValidatorSubscriptions};
 
     fn pubkey_bytes(byte: u8) -> [u8; 32] {
@@ -924,5 +974,44 @@ mod tests {
             whitelisted,
             [pubkey_b58(1), pubkey_b58(2)].into_iter().collect()
         );
+    }
+
+    #[tokio::test]
+    async fn test_ping_returns_ok() {
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let snapshot_store = MockSnapshotStore::new(HashMap::new());
+        let validator = MockValidatorSubscriptions::succeed();
+
+        let service = GrpcSubscriptionService::new(
+            dispatcher,
+            snapshot_store,
+            validator,
+            ServiceReadiness::ready_for_test(),
+        );
+
+        let response =
+            service.ping(Request::new(PingRequest { count: 0 })).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_ping_returns_unavailable_when_not_ready() {
+        use tonic::Code;
+        let dispatcher = DispatcherHandle::spawn(8, 8);
+        let snapshot_store = MockSnapshotStore::new(HashMap::new());
+        let validator = MockValidatorSubscriptions::succeed();
+
+        let service = GrpcSubscriptionService::new(
+            dispatcher,
+            snapshot_store,
+            validator,
+            ServiceReadiness::new(),
+        );
+
+        let response = service
+            .ping(Request::new(PingRequest { count: 0 }))
+            .await
+            .unwrap_err();
+        assert_eq!(response.code(), Code::Unavailable);
     }
 }

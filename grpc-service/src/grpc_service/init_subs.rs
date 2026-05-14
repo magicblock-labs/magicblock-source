@@ -1,3 +1,5 @@
+use tracing::{debug, info};
+
 use crate::errors::{GeykagError, GeykagResult};
 use crate::traits::ValidatorSubscriptions;
 
@@ -34,6 +36,12 @@ impl InitSubsClient {
             .join(",");
         let body = format!(r#"{{"pubkeys":[{pubkeys_json}]}}"#);
 
+        debug!(
+            url = %self.accounts_filter_url,
+            pubkey_count = pubkeys.len(),
+            "validator whitelist HTTP POST starting"
+        );
+
         self.http
             .post(&self.accounts_filter_url)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -42,8 +50,15 @@ impl InitSubsClient {
             .await
             .map_err(|source| GeykagError::InitSubsRequest { source })?
             .error_for_status()
-            .map(|_| ())
-            .map_err(|source| GeykagError::InitSubsRequestStatus { source })
+            .map_err(|source| GeykagError::InitSubsRequestStatus { source })?;
+
+        info!(
+            url = %self.accounts_filter_url,
+            pubkey_count = pubkeys.len(),
+            "validator whitelist HTTP POST completed"
+        );
+
+        Ok(())
     }
 }
 

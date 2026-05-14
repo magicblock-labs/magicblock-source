@@ -1,13 +1,18 @@
 use crate::config::Config;
 use crate::domain::AccountEvent;
 use crate::errors::GeykagResult;
-use crate::grpc_service::{GrpcService, GrpcServiceHandle, GrpcSink};
+use crate::grpc_service::{
+    GrpcService, GrpcServiceHandle, GrpcSink, ServiceReadiness,
+};
 use crate::kafka::KafkaAccountUpdateStream;
 use crate::ksql::KsqlAccountSnapshotClient;
 use crate::output::{ConsoleSink, TeeSink};
+use crate::preflight;
 use crate::traits::{
     AccountSink, AccountUpdateSource, SnapshotStore, StatusSink,
 };
+use std::time::Duration;
+use tokio_util::sync::CancellationToken;
 
 pub struct App<
     P: SnapshotStore,
@@ -20,6 +25,7 @@ pub struct App<
     account_update_source: K,
     sink: A,
     status_sink: S,
+    readiness: ServiceReadiness,
 }
 
 impl
@@ -34,14 +40,20 @@ impl
     pub fn new(config: Config) -> GeykagResult<Self> {
         let snapshot_store =
             KsqlAccountSnapshotClient::new(config.ksql.clone())?;
-        let account_update_source =
-            KafkaAccountUpdateStream::new(config.kafka.clone());
+        let readiness = ServiceReadiness::new();
+        let shutdown = CancellationToken::new();
+        let account_update_source = KafkaAccountUpdateStream::new(
+            config.kafka.clone(),
+            readiness.clone(),
+            shutdown.clone(),
+        );
         Ok(Self::build(
             config,
             snapshot_store,
             account_update_source,
             ConsoleSink::new(),
             ConsoleSink::new(),
+            readiness,
         ))
     }
 }
@@ -55,19 +67,27 @@ impl
     >
 {
     #[allow(dead_code)]
-    pub fn new_grpc(config: Config) -> GeykagResult<(Self, GrpcServiceHandle)> {
+    pub fn new_grpc(
+        config: Config,
+        shutdown: CancellationToken,
+    ) -> GeykagResult<(Self, GrpcServiceHandle)> {
         let grpc = GrpcService::start(&config)?;
         let sink = grpc.sink();
         let snapshot_store =
             KsqlAccountSnapshotClient::new(config.ksql.clone())?;
-        let account_update_source =
-            KafkaAccountUpdateStream::new(config.kafka.clone());
+        let readiness = grpc.readiness();
+        let account_update_source = KafkaAccountUpdateStream::new(
+            config.kafka.clone(),
+            readiness.clone(),
+            shutdown.clone(),
+        );
         let app = Self::build(
             config,
             snapshot_store,
             account_update_source,
             sink,
             ConsoleSink::new(),
+            readiness,
         );
 
         Ok((app, grpc))
@@ -84,19 +104,25 @@ impl
 {
     pub fn new_grpc_with_console(
         config: Config,
+        shutdown: CancellationToken,
     ) -> GeykagResult<(Self, GrpcServiceHandle)> {
         let grpc = GrpcService::start(&config)?;
         let sink = TeeSink::new(grpc.sink(), ConsoleSink::new());
         let snapshot_store =
             KsqlAccountSnapshotClient::new(config.ksql.clone())?;
-        let account_update_source =
-            KafkaAccountUpdateStream::new(config.kafka.clone());
+        let readiness = grpc.readiness();
+        let account_update_source = KafkaAccountUpdateStream::new(
+            config.kafka.clone(),
+            readiness.clone(),
+            shutdown.clone(),
+        );
         let app = Self::build(
             config,
             snapshot_store,
             account_update_source,
             sink,
             ConsoleSink::new(),
+            readiness,
         );
 
         Ok((app, grpc))
@@ -112,6 +138,7 @@ impl<P: SnapshotStore, K: AccountUpdateSource, A: AccountSink, S: StatusSink>
         account_update_source: K,
         sink: A,
         status_sink: S,
+        readiness: ServiceReadiness,
     ) -> Self {
         Self {
             config,
@@ -119,6 +146,7 @@ impl<P: SnapshotStore, K: AccountUpdateSource, A: AccountSink, S: StatusSink>
             account_update_source,
             sink,
             status_sink,
+            readiness,
         }
     }
 
@@ -145,6 +173,19 @@ impl<P: SnapshotStore, K: AccountUpdateSource, A: AccountSink, S: StatusSink>
             }
         }
 
+        // Startup preflight gates client-visible readiness.
+        if !self.readiness.is_ready() {
+            preflight::wait_for_dependencies(
+                &self.config,
+                Duration::from_secs(60),
+            )
+            .await?;
+            self.readiness.mark_preflight_ready();
+            tracing::info!(
+                "startup preflight complete; waiting for Kafka consumer assignment before advertising readiness"
+            );
+        }
+
         self.account_update_source
             .run(self.config.pubkey_filter.as_ref(), |message| {
                 let event = AccountEvent::Live(message);
@@ -168,11 +209,11 @@ mod tests {
         bytes_to_base58,
     };
     use crate::errors::{GeykagError, GeykagResult};
+    use crate::grpc_service::ServiceReadiness;
     use crate::kafka::StreamMessage;
     use crate::traits::{
         AccountSink, AccountUpdateSource, SnapshotStore, StatusSink,
     };
-
     fn config(pubkey_filter: Option<PubkeyFilter>) -> Config {
         Config {
             kafka: KafkaConfig {
@@ -189,6 +230,7 @@ mod tests {
             validator: ValidatorConfig {
                 accounts_filter_url: "http://localhost:3000/filters/accounts"
                     .to_owned(),
+                rpc_url: "http://localhost:8899".to_owned(),
             },
             grpc: GrpcConfig {
                 bind_host: "127.0.0.1".to_owned(),
@@ -415,6 +457,7 @@ mod tests {
             update_source.clone(),
             sink.clone(),
             status_sink.clone(),
+            ServiceReadiness::ready_for_test(),
         );
 
         app.run().await.unwrap();
@@ -439,6 +482,7 @@ mod tests {
             update_source.clone(),
             RecordingSink::new(false, false),
             status_sink.clone(),
+            ServiceReadiness::ready_for_test(),
         );
 
         app.run().await.unwrap();
@@ -463,6 +507,7 @@ mod tests {
             update_source.clone(),
             RecordingSink::new(false, false),
             status_sink.clone(),
+            ServiceReadiness::ready_for_test(),
         );
 
         app.run().await.unwrap();
@@ -490,6 +535,7 @@ mod tests {
             update_source.clone(),
             RecordingSink::new(false, false),
             RecordingStatusSink::new(),
+            ServiceReadiness::ready_for_test(),
         );
 
         let error = app.run().await.unwrap_err();
@@ -510,6 +556,7 @@ mod tests {
             update_source.clone(),
             RecordingSink::new(true, false),
             RecordingStatusSink::new(),
+            ServiceReadiness::ready_for_test(),
         );
 
         let error = app.run().await.unwrap_err();
@@ -529,6 +576,7 @@ mod tests {
             update_source.clone(),
             RecordingSink::new(false, true),
             RecordingStatusSink::new(),
+            ServiceReadiness::ready_for_test(),
         );
 
         let error = app.run().await.unwrap_err();
@@ -548,6 +596,7 @@ mod tests {
             update_source.clone(),
             RecordingSink::new(false, false),
             RecordingStatusSink::new(),
+            ServiceReadiness::ready_for_test(),
         );
 
         let error = app.run().await.unwrap_err();
