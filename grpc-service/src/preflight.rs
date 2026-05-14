@@ -47,7 +47,7 @@ pub async fn wait_for_dependencies(
     .await?;
 
     run_probe_with_retry("kafka-metadata", deadline, || async {
-        KafkaAccountUpdateStream::probe_config(&config.kafka)
+        KafkaAccountUpdateStream::probe_config(&config.kafka).await
     })
     .await?;
 

@@ -113,6 +113,12 @@ pub enum GeykagError {
         source: KafkaError,
     },
     #[allow(dead_code)]
+    #[error("Kafka metadata probe task failed")]
+    PreflightKafkaProbeJoin {
+        #[source]
+        source: tokio::task::JoinError,
+    },
+    #[allow(dead_code)]
     #[error(
         "startup preflight timed out after {elapsed_ms} ms; last failing probe: {probe}"
     )]
