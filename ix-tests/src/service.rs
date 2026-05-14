@@ -431,8 +431,13 @@ impl ServiceController {
             }
 
             if tokio::time::Instant::now() >= deadline {
-                RunArtifacts::dump_service_logs_at(log_paths)
-                    .context("failed to dump service logs")?;
+                if let Err(err) = RunArtifacts::dump_service_logs_at(log_paths) {
+                    warn!(
+                        endpoint,
+                        error = %err,
+                        "failed to dump service logs after grpc-service readiness timeout"
+                    );
+                }
                 bail!(
                     "grpc-service at {} did not become ready within {:?}\n\
                      stdout: {}\n\
