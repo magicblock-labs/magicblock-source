@@ -19,12 +19,27 @@ use crate::layout::ServiceInstance;
 const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_SERVICE_GRPC_PORT: u16 = 50051;
 
+/// Describes whether a service was started by this harness or supplied externally.
 #[allow(dead_code)]
 pub enum ServiceOwnership {
+    /// Child process spawned by [`ServiceController::start`].
+    ///
+    /// The process is spawned with `.kill_on_drop(true)` and stored in
+    /// [`ServiceHandle`] as `ServiceOwnership::Owned(child)`. Dropping the
+    /// handle without passing it to [`ServiceController::shutdown`] therefore
+    /// kills the child immediately instead of performing the graceful SIGTERM
+    /// shutdown path.
     Owned(tokio::process::Child),
     External,
 }
 
+/// Handle that keeps a service process alive for the lifetime of a test.
+///
+/// Callers must retain this handle until they are ready to terminate the
+/// service. For owned services, call [`ServiceController::shutdown`] with the
+/// handle to request graceful termination; otherwise the contained child was
+/// created with `.kill_on_drop(true)` and will be killed when the handle (and
+/// its `ServiceOwnership::Owned(child)`) is dropped.
 #[allow(dead_code)]
 pub struct ServiceHandle {
     pub instance: ServiceInstance,
